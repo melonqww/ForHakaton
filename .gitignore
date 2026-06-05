@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Hackathon / Data / Intermediate Files
+Архитектура Проекта Хакатон/
+Обработанные файлы/
+cases_synthetic.xlsx
+temp_bench_*
+src/classifier.pkl
+*.pkl
+
+# Log files
+*.log
