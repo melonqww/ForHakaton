@@ -408,16 +408,60 @@ with tab_upload:
         "нормализацию географических названий, маскирование конфиденциальных данных и расчитает ранг критичности."
     )
     
-    uploaded_files = st.file_uploader(
-        "Выберите файлы Excel", 
-        type=["xlsx"],
-        accept_multiple_files=True,
-        help="Таблицы должны содержать колонки с датой создания, текстом обращения и районом."
-    )
+    input_source = st.radio("Источник данных:", ["Загрузить через браузер", "Выбрать локальный файл из проекта/диска"], horizontal=True)
     
-    if uploaded_files:
-        st.success(f"Файлы успешно загружены в очередь (всего: {len(uploaded_files)}).")
-        
+    uploaded_files = []
+    local_files_to_process = []
+    
+    if input_source == "Загрузить через браузер":
+        uploaded_files = st.file_uploader(
+            "Выберите файлы Excel", 
+            type=["xlsx"],
+            accept_multiple_files=True,
+            help="Таблицы должны содержать колонки с датой создания, текстом обращения и районом."
+        )
+        if uploaded_files:
+            st.success(f"Файлы успешно загружены в очередь (всего: {len(uploaded_files)}).")
+    else:
+        # Поиск xlsx в текущей папке
+        local_xlsx_files = []
+        try:
+            local_xlsx_files = [f for f in os.listdir(os.getcwd()) if f.endswith('.xlsx') and not f.startswith('~$') and not f.startswith('temp_')]
+            local_xlsx_files.sort()
+        except Exception:
+            pass
+            
+        st.markdown("**Доступные локальные файлы Excel в папке проекта:**")
+        if local_xlsx_files:
+            selected_local_files = st.multiselect(
+                "Выберите файлы для обработки:",
+                options=local_xlsx_files,
+                default=[f for f in local_xlsx_files if "prod" in f or "real" in f] or ([local_xlsx_files[0]] if local_xlsx_files else [])
+            )
+        else:
+            selected_local_files = []
+            st.info("В текущей папке проекта не найдено файлов .xlsx.")
+            
+        custom_file_path = st.text_input("Или введите абсолютный путь к файлу на диске:")
+        if custom_file_path:
+            cleaned_path = custom_file_path.strip().strip('"').strip("'")
+            if os.path.exists(cleaned_path) and cleaned_path.endswith('.xlsx'):
+                if cleaned_path not in selected_local_files:
+                    selected_local_files.append(cleaned_path)
+            else:
+                st.error("Файл по указанному пути не найден или имеет неверный формат.")
+                
+        if selected_local_files:
+            st.success(f"Выбрано локальных файлов для обработки: {len(selected_local_files)}")
+            for f in selected_local_files:
+                if os.path.isabs(f):
+                    local_files_to_process.append({"name": os.path.basename(f), "path": f})
+                else:
+                    local_files_to_process.append({"name": f, "path": os.path.abspath(f)})
+                    
+    has_files = (input_source == "Загрузить через браузер" and uploaded_files) or (input_source == "Выбрать локальный файл из проекта/диска" and local_files_to_process)
+    
+    if has_files:
         if st.button("Начать обработку данных", type="primary"):
             st.session_state.processed_files = {}
             st.session_state.result_df = None
@@ -434,10 +478,32 @@ with tab_upload:
             status_text.text("Подготовка классификатора обращений...")
             classifier = RequestClassifier()
             
-            if not classifier.model:
-                status_text.text("Обучение модели классификатора на первом загруженном датасете...")
+            # Собираем список файлов для обработки
+            files_queue = []
+            if input_source == "Загрузить через браузер":
+                for idx, uploaded_file in enumerate(uploaded_files):
+                    temp_input_path = os.path.join(processed_dir, f"temp_in_{uploaded_file.name}")
+                    with open(temp_input_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    files_queue.append({
+                        "name": uploaded_file.name,
+                        "input_path": temp_input_path,
+                        "output_path": os.path.join(processed_dir, f"Обработанные_{uploaded_file.name}"),
+                        "is_temp": True
+                    })
+            else:
+                for f_info in local_files_to_process:
+                    files_queue.append({
+                        "name": f_info["name"],
+                        "input_path": f_info["path"],
+                        "output_path": os.path.join(processed_dir, f"Обработанные_{f_info['name']}"),
+                        "is_temp": False
+                    })
+            
+            if not classifier.model and files_queue:
+                status_text.text("Обучение модели классификатора на первом наборе данных...")
                 try:
-                    temp_df = pd.read_excel(uploaded_files[0])
+                    temp_df = pd.read_excel(files_queue[0]["input_path"])
                     if "CLASS_LABEL" in temp_df.columns:
                         col_text = find_column_index(temp_df, "text", 36)
                         texts = temp_df.iloc[:, col_text].fillna("").astype(str).tolist()
@@ -450,50 +516,48 @@ with tab_upload:
             
             start_time = time.time()
             all_dfs = []
+            processed_file_names = []
             
             try:
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    status_text.text(f"Сохранение временного файла {uploaded_file.name}...")
-                    temp_input_path = os.path.join(processed_dir, f"temp_in_{uploaded_file.name}")
-                    
-                    with open(temp_input_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    
-                    output_filename = f"Обработанные_{uploaded_file.name}"
-                    output_path = os.path.join(processed_dir, output_filename)
+                for idx, f_item in enumerate(files_queue):
+                    name = f_item["name"]
+                    input_path = f_item["input_path"]
+                    output_path = f_item["output_path"]
                     
                     def streamlit_progress_callback(current, total):
                         percent = int((current / total) * 80) + 10
                         progress_bar.progress(percent)
                         status_text.text(
-                            f"Файл {idx+1}/{len(uploaded_files)} ({uploaded_file.name}): "
+                            f"Файл {idx+1}/{len(files_queue)} ({name}): "
                             f"обработано {current} из {total} уникальных проблемных обращений ({percent}%)..."
                         )
                     
                     run_pipeline(
-                        temp_input_path, 
+                        input_path, 
                         output_path, 
                         use_llm=use_llm, 
                         ollama_url=ollama_url, 
                         max_workers=max_workers,
-                        progress_callback=streamlit_progress_callback
+                        progress_callback=streamlit_progress_callback,
+                        classifier=classifier
                     )
                     
                     # Читаем результат обработанного файла для аналитики
                     file_df = pd.read_excel(output_path)
                     all_dfs.append(file_df)
+                    processed_file_names.append((name, file_df))
                     
                     # Удаляем временный входной файл
-                    if os.path.exists(temp_input_path):
-                        os.remove(temp_input_path)
+                    if f_item["is_temp"] and os.path.exists(input_path):
+                        os.remove(input_path)
                 
                 elapsed = time.time() - start_time
                 progress_bar.progress(100)
                 status_text.text("Обработка всех файлов успешно завершена!")
                 
                 processed_files = {}
-                for uploaded_file, df in zip(uploaded_files, all_dfs):
-                    processed_files[uploaded_file.name] = df
+                for name, df in processed_file_names:
+                    processed_files[name] = df
                 st.session_state.processed_files = processed_files
                 
                 combined_df = pd.concat(all_dfs, ignore_index=True)
@@ -509,12 +573,11 @@ with tab_upload:
             except Exception as e:
                 st.error(f"Ошибка в процессе обработки: {e}")
                 # Чистим временные файлы в случае ошибки
-                for uploaded_file in uploaded_files:
-                    temp_path = os.path.join(processed_dir, f"temp_in_{uploaded_file.name}")
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
+                for f_item in files_queue:
+                    if f_item["is_temp"] and os.path.exists(f_item["input_path"]):
+                        os.remove(f_item["input_path"])
     else:
-        st.info("Загрузите один или несколько Excel файлов для запуска обработки.")
+        st.info("Пожалуйста, загрузите файлы или выберите локальный файл из списка.")
 
 with tab_analytics:
     st.subheader("Аналитическая сводка по инцидентам")

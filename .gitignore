@@ -27,6 +27,8 @@ cases_synthetic.xlsx
 temp_bench_*
 src/classifier.pkl
 *.pkl
+scratch/
+*.xlsx
 
 # Log files
 *.log
