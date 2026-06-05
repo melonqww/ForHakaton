@@ -3,8 +3,11 @@ import pandas as pd
 import os
 import time
 
-from src.pipeline import run_pipeline, find_column_index
+from src.pipeline import run_pipeline
+from src.utils import find_column_index
 from src.classifier import RequestClassifier
+import src.ollama_helper as oh
+
 
 def get_subdirectories(path):
     """Возвращает список поддиректорий в указанном пути, исключая скрытые."""
@@ -379,6 +382,78 @@ max_workers = st.sidebar.slider(
     help="Параллельные запросы к локальной LLM для увеличения скорости обработки"
 )
 
+# Панель автонастройки и статуса Ollama
+if use_llm:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Статус локального ИИ")
+    
+    is_running = oh.is_ollama_running(ollama_url)
+    
+    if is_running:
+        has_qwen = oh.has_model(ollama_url, "qwen2.5:0.5b")
+        if has_qwen:
+            st.sidebar.success("🟢 Ollama активна и готова к работе (модель qwen2.5:0.5b найдена)")
+        else:
+            st.sidebar.warning("🟡 Ollama запущена, но модель qwen2.5:0.5b отсутствует.")
+            
+            # Автоматическое скачивание модели в фоне
+            if not oh.OLLAMA_STATUS["pulling_model"] and not oh.OLLAMA_STATUS["pull_done"] and not oh.OLLAMA_STATUS["pull_error"]:
+                st.sidebar.info("📥 Запуск фонового скачивания модели qwen2.5:0.5b...")
+                oh.pull_model_background(ollama_url, "qwen2.5:0.5b")
+                st.rerun()
+                
+            if oh.OLLAMA_STATUS["pulling_model"]:
+                st.sidebar.info(f"⏳ Скачивание модели: {oh.OLLAMA_STATUS['pull_progress']}")
+                time.sleep(1.5)
+                st.rerun()
+            elif oh.OLLAMA_STATUS["pull_done"]:
+                st.sidebar.success("✅ Модель qwen2.5:0.5b успешно загружена!")
+                time.sleep(1.0)
+                st.rerun()
+            elif oh.OLLAMA_STATUS["pull_error"]:
+                st.sidebar.error(f"❌ Ошибка скачивания модели: {oh.OLLAMA_STATUS['pull_error']}")
+                if st.sidebar.button("Повторить загрузку модели"):
+                    oh.OLLAMA_STATUS["pull_error"] = None
+                    oh.pull_model_background(ollama_url, "qwen2.5:0.5b")
+                    st.rerun()
+    else:
+        installed_path = oh.find_ollama_path()
+        if installed_path:
+            st.sidebar.warning("🟡 Ollama установлена, но не запущен сервис. Пытаемся запустить...")
+            started = oh.start_ollama_local()
+            if started:
+                st.sidebar.info("⏳ Запуск службы Ollama...")
+                time.sleep(3.0)
+                st.rerun()
+            else:
+                st.sidebar.error("❌ Не удалось запустить Ollama автоматически. Запустите её вручную.")
+        else:
+            st.sidebar.error("🔴 Ollama не установлена на компьютере.")
+            
+            # Автоматическое скачивание установщика в фоне
+            if not oh.OLLAMA_STATUS["downloading_setup"] and not oh.OLLAMA_STATUS["download_done"] and not oh.OLLAMA_STATUS["download_error"]:
+                st.sidebar.info("📥 Запуск фонового скачивания OllamaSetup.exe...")
+                oh.download_ollama_setup_background(os.getcwd())
+                st.rerun()
+                
+            if oh.OLLAMA_STATUS["downloading_setup"]:
+                progress_pct = oh.OLLAMA_STATUS["download_progress"]
+                st.sidebar.info(f"⏳ Скачивание OllamaSetup.exe ({progress_pct*100:.1f}%)")
+                st.sidebar.progress(progress_pct)
+                time.sleep(1.5)
+                st.rerun()
+            elif oh.OLLAMA_STATUS["download_done"]:
+                st.sidebar.success("✅ OllamaSetup.exe успешно скачан в папку проекта!")
+                st.sidebar.info("Запустите OllamaSetup.exe из папки проекта для установки.")
+            elif oh.OLLAMA_STATUS["download_error"]:
+                st.sidebar.error(f"❌ Ошибка при скачивании установщика: {oh.OLLAMA_STATUS['download_error']}")
+                if st.sidebar.button("Повторить скачивание установщика"):
+                    oh.OLLAMA_STATUS["download_error"] = None
+                    oh.download_ollama_setup_background(os.getcwd())
+                    st.rerun()
+
+    st.sidebar.markdown("---")
+
 st.sidebar.info(
     "Бинарный классификатор спама обучается автоматически на входящих размеченных данных "
     "и отсекает благодарности/информационные запросы от реальных проблем."
@@ -394,6 +469,97 @@ if st.session_state.processed_files:
         options=file_options,
         help="Выберите конкретный файл для просмотра его данных или оставьте объединение всех файлов."
     )
+
+def get_active_stats_and_preview(selected_file):
+    if not st.session_state.processed_files:
+        return None, None
+        
+    if selected_file == "Все файлы вместе":
+        files_list = list(st.session_state.processed_files.values())
+        combined_preview = pd.concat([f["preview_df"].head(100) for f in files_list], ignore_index=True).head(1000)
+        
+        combined_stats = {
+            "total_count": sum(f["stats"]["total_count"] for f in files_list),
+            "problems_count": sum(f["stats"]["problems_count"] for f in files_list),
+            "category_counts": {},
+            "rank_counts": {},
+            "district_counts": {},
+            "district_stats": {}
+        }
+        
+        for f in files_list:
+            s = f["stats"]
+            for cat, val in s.get("category_counts", {}).items():
+                combined_stats["category_counts"][cat] = combined_stats["category_counts"].get(cat, 0) + val
+            for r, val in s.get("rank_counts", {}).items():
+                combined_stats["rank_counts"][r] = combined_stats["rank_counts"].get(r, 0) + val
+            for dist, val in s.get("district_counts", {}).items():
+                combined_stats["district_counts"][dist] = combined_stats["district_counts"].get(dist, 0) + val
+                
+            d_stats = s.get("district_stats", {})
+            for dist, d_data in d_stats.items():
+                if dist not in combined_stats["district_stats"]:
+                    combined_stats["district_stats"][dist] = {
+                        "count": 0,
+                        "rank_sum": 0.0,
+                        "rank_count": 0,
+                        "critical_count": 0,
+                        "categories": {},
+                        "summaries": []
+                    }
+                m_stats = combined_stats["district_stats"][dist]
+                m_stats["count"] += d_data.get("count", 0)
+                m_stats["rank_sum"] += d_data.get("rank_sum", 0.0)
+                m_stats["rank_count"] += d_data.get("rank_count", 0)
+                m_stats["critical_count"] += d_data.get("critical_count", 0)
+                
+                for cat, val in d_data.get("categories", {}).items():
+                    m_stats["categories"][cat] = m_stats["categories"].get(cat, 0) + val
+                    
+                for summ in d_data.get("summaries", []):
+                    if len(m_stats["summaries"]) < 3 and summ not in m_stats["summaries"]:
+                        m_stats["summaries"].append(summ)
+                        
+        sorted_districts = sorted(combined_stats["district_stats"].items(), key=lambda x: x[1]["count"], reverse=True)
+        
+        top3_districts = []
+        for district, d_data in sorted_districts[:3]:
+            sorted_cats = sorted(d_data["categories"].items(), key=lambda x: x[1], reverse=True)
+            top_cat = sorted_cats[0][0] if sorted_cats else "Другое"
+            avg_rank = d_data["rank_sum"] / d_data["rank_count"] if d_data["rank_count"] > 0 else 0
+            key_problems = "; ".join(d_data["summaries"])
+            
+            top3_districts.append({
+                "district": district,
+                "count": d_data["count"],
+                "top_cat": top_cat,
+                "avg_rank": avg_rank,
+                "critical_count": d_data["critical_count"],
+                "key_problems": key_problems
+            })
+            
+        top10_districts = []
+        for district, d_data in sorted_districts[:10]:
+            sorted_cats = sorted(d_data["categories"].items(), key=lambda x: x[1], reverse=True)
+            top_cat = sorted_cats[0][0] if sorted_cats else "Другое"
+            avg_rank = d_data["rank_sum"] / d_data["rank_count"] if d_data["rank_count"] > 0 else 0
+            
+            top10_districts.append({
+                "district": district,
+                "count": d_data["count"],
+                "top_cat": top_cat,
+                "avg_rank": avg_rank
+            })
+            
+        combined_stats["top3_districts"] = top3_districts
+        combined_stats["top10_districts"] = top10_districts
+        
+        return combined_stats, combined_preview
+    else:
+        f_data = st.session_state.processed_files.get(selected_file)
+        if f_data:
+            return f_data["stats"], f_data["preview_df"]
+        return None, None
 
 tab_upload, tab_analytics, tab_preview = st.tabs([
     "Загрузка и обработка", 
@@ -503,11 +669,28 @@ with tab_upload:
             if not classifier.model and files_queue:
                 status_text.text("Обучение модели классификатора на первом наборе данных...")
                 try:
-                    temp_df = pd.read_excel(files_queue[0]["input_path"])
-                    if "CLASS_LABEL" in temp_df.columns:
-                        col_text = find_column_index(temp_df, "text", 36)
-                        texts = temp_df.iloc[:, col_text].fillna("").astype(str).tolist()
-                        labels = temp_df["CLASS_LABEL"].fillna("Проблема").tolist()
+                    # Сначала читаем только одну строку для получения заголовков
+                    first_file = files_queue[0]["input_path"]
+                    header_df = pd.read_excel(first_file, nrows=1)
+                    col_text_idx = find_column_index(header_df, "text", 36)
+                    col_text_name = header_df.columns[col_text_idx]
+                    
+                    target_col = None
+                    if "CLASS_LABEL" in header_df.columns:
+                        target_col = "CLASS_LABEL"
+                    elif "Тип инцидента" in header_df.columns:
+                        target_col = "Тип инцидента"
+                        
+                    if target_col:
+                        # Загружаем только нужные две колонки и ограничиваем количество строк
+                        temp_df = pd.read_excel(first_file, usecols=[col_text_name, target_col], nrows=20000)
+                        texts = temp_df[col_text_name].fillna("").astype(str).tolist()
+                        
+                        if target_col == "Тип инцидента":
+                            labels = ["Проблема" if x == "Решаемый" else "Не проблема" for x in temp_df[target_col]]
+                        else:
+                            labels = temp_df[target_col].fillna("Проблема").tolist()
+                            
                         classifier.train(texts, labels)
                 except Exception as e:
                     st.warning(f"Не удалось автоматически дообучить классификатор: {e}. Используется эвристика.")
@@ -532,7 +715,7 @@ with tab_upload:
                             f"обработано {current} из {total} уникальных проблемных обращений ({percent}%)..."
                         )
                     
-                    run_pipeline(
+                    stats, file_df = run_pipeline(
                         input_path, 
                         output_path, 
                         use_llm=use_llm, 
@@ -542,10 +725,7 @@ with tab_upload:
                         classifier=classifier
                     )
                     
-                    # Читаем результат обработанного файла для аналитики
-                    file_df = pd.read_excel(output_path)
-                    all_dfs.append(file_df)
-                    processed_file_names.append((name, file_df))
+                    processed_file_names.append((name, {"stats": stats, "preview_df": file_df}))
                     
                     # Удаляем временный входной файл
                     if f_item["is_temp"] and os.path.exists(input_path):
@@ -556,12 +736,12 @@ with tab_upload:
                 status_text.text("Обработка всех файлов успешно завершена!")
                 
                 processed_files = {}
-                for name, df in processed_file_names:
-                    processed_files[name] = df
+                for name, data in processed_file_names:
+                    processed_files[name] = data
                 st.session_state.processed_files = processed_files
                 
-                combined_df = pd.concat(all_dfs, ignore_index=True)
-                st.session_state.result_df = combined_df
+                preview_list = [f["preview_df"].head(100) for f in processed_files.values()]
+                st.session_state.result_df = pd.concat(preview_list, ignore_index=True) if preview_list else None
                 st.session_state.elapsed_time = elapsed
                 
                 st.success(
@@ -583,149 +763,163 @@ with tab_analytics:
     st.subheader("Аналитическая сводка по инцидентам")
     
     if st.session_state.result_df is not None:
-        if selected_file == "Все файлы вместе":
-            df_res = st.session_state.result_df
-        else:
-            df_res = st.session_state.processed_files.get(selected_file, st.session_state.result_df)
-        df_problems = df_res[df_res["Тип инцидента"] == "Проблема"]
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        stats, preview_df = get_active_stats_and_preview(selected_file)
         
-        with kpi1:
-            st.markdown(
-                f'<div class="metric-container"><div class="metric-val">{len(df_res)}</div>'
-                f'<div class="metric-lbl">Всего обращений</div></div>', 
-                unsafe_allow_html=True
-            )
-        with kpi2:
-            st.markdown(
-                f'<div class="metric-container"><div class="metric-val">{len(df_problems)}</div>'
-                f'<div class="metric-lbl">Реальные проблемы</div></div>', 
-                unsafe_allow_html=True
-            )
-        with kpi3:
-            spam_count = len(df_res) - len(df_problems)
-            st.markdown(
-                f'<div class="metric-container"><div class="metric-val">{spam_count}</div>'
-                f'<div class="metric-lbl">Отсеяно (Спам/Благодарности)</div></div>', 
-                unsafe_allow_html=True
-            )
-        with kpi4:
-            st.markdown(
-                f'<div class="metric-container"><div class="metric-val">{st.session_state.elapsed_time:.1f}с</div>'
-                f'<div class="metric-lbl">Время обработки</div></div>', 
-                unsafe_allow_html=True
-            )
+        if stats is not None:
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
             
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        if not df_problems.empty:
-            st.markdown("##### Лидеры по количеству инцидентов (Топ-3)")
-            top_3_districts = df_problems["Нормализованное Гео"].value_counts().head(3).reset_index()
-            top_3_districts.columns = ["Район", "Количество"]
-            
-            cols_top3 = st.columns(min(3, len(top_3_districts)))
-            labels = ["1-е место", "2-е место", "3-е место"]
-            colors = ["transparent", "transparent", "transparent"]
-            border_colors = ["rgba(128, 128, 128, 0.25)", "rgba(128, 128, 128, 0.25)", "rgba(128, 128, 128, 0.25)"]
-            text_colors = ["inherit", "inherit", "inherit"]
-            
-            for idx, row in top_3_districts.iterrows():
-                with cols_top3[idx]:
-                    district_name = row["Район"].replace(" р-н", "").replace(" рн", "").replace(" район", "").replace(" немецкий национальный", "").replace(" г. Омск", "Омск").replace("г. Омск", "Омск")
-                    st.markdown(f"""
-                    <div style="
-                        background-color: {colors[idx]};
-                        border: 1px solid {border_colors[idx]};
-                        border-radius: 8px;
-                        padding: 0.85rem;
-                        text-align: center;
-                        margin-bottom: 1rem;
-                    ">
-                        <div style="font-size: 0.8rem; font-weight: bold; color: {text_colors[idx]}; text-transform: uppercase;">
-                            {labels[idx]}
-                        </div>
-                        <div style="font-size: 1.25rem; font-weight: bold; color: inherit; margin-top: 0.2rem; margin-bottom: 0.2rem;">
-                            {district_name}
-                        </div>
-                        <div style="font-size: 0.85rem; color: inherit;">
-                            Количество инцидентов: <b>{row['Количество']}</b>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
+            with kpi1:
+                st.markdown(
+                    f'<div class="metric-container"><div class="metric-val">{stats["total_count"]}</div>'
+                    f'<div class="metric-lbl">Всего обращений</div></div>', 
+                    unsafe_allow_html=True
+                )
+            with kpi2:
+                st.markdown(
+                    f'<div class="metric-container"><div class="metric-val">{stats["problems_count"]}</div>'
+                    f'<div class="metric-lbl">Реальные проблемы</div></div>', 
+                    unsafe_allow_html=True
+                )
+            with kpi3:
+                spam_count = stats["total_count"] - stats["problems_count"]
+                st.markdown(
+                    f'<div class="metric-container"><div class="metric-val">{spam_count}</div>'
+                    f'<div class="metric-lbl">Отсеяно (Спам/Благодарности)</div></div>', 
+                    unsafe_allow_html=True
+                )
+            with kpi4:
+                st.markdown(
+                    f'<div class="metric-container"><div class="metric-val">{st.session_state.elapsed_time:.1f}с</div>'
+                    f'<div class="metric-lbl">Время обработки</div></div>', 
+                    unsafe_allow_html=True
+                )
+                
             st.markdown("<br>", unsafe_allow_html=True)
             
-            col_charts_1, col_charts_2 = st.columns(2)
-            
-            with col_charts_1:
-                st.markdown("##### Топ-10 районов Омской области по числу проблем")
-                district_counts = df_problems["Нормализованное Гео"].value_counts().head(10).reset_index()
-                district_counts.columns = ["Район", "Количество"]
+            if stats["problems_count"] > 0:
+                st.markdown("##### Лидеры по количеству инцидентов (Топ-3)")
                 
-                chart_df = district_counts.copy()
-                chart_df["Район"] = chart_df["Район"].apply(
-                    lambda x: x.replace(" р-н", "")
-                               .replace(" рн", "")
-                               .replace(" район", "")
-                               .replace(" немецкий национальный", "")
-                               .replace(" г. Омск", "Омск")
-                               .replace("г. Омск", "Омск")
-                )
+                cols_top3 = st.columns(min(3, len(stats["top3_districts"])))
+                labels = ["1-е место", "2-е место", "3-е место"]
+                colors = ["transparent", "transparent", "transparent"]
+                border_colors = ["rgba(128, 128, 128, 0.25)", "rgba(128, 128, 128, 0.25)", "rgba(128, 128, 128, 0.25)"]
+                text_colors = ["inherit", "inherit", "inherit"]
                 
-                st.vega_lite_chart(
-                    chart_df,
-                    {
-                        "mark": {"type": "bar", "color": "#1E3A8A"},
-                        "encoding": {
-                            "x": {
-                                "field": "Район", 
-                                "type": "nominal", 
-                                "axis": {"labelAngle": 0, "labelOverlap": "hide"},
-                                "title": "Район"
+                for idx, row in enumerate(stats["top3_districts"]):
+                    if idx >= len(cols_top3):
+                        break
+                    with cols_top3[idx]:
+                        district_name = row["district"].replace(" р-н", "").replace(" рн", "").replace(" район", "").replace(" немецкий национальный", "").replace(" г. Омск", "Омск").replace("г. Омск", "Омск")
+                        st.markdown(f"""
+                        <div style="
+                            background-color: {colors[idx]};
+                            border: 1px solid {border_colors[idx]};
+                            border-radius: 8px;
+                            padding: 0.85rem;
+                            text-align: center;
+                            margin-bottom: 1rem;
+                        ">
+                            <div style="font-size: 0.8rem; font-weight: bold; color: {text_colors[idx]}; text-transform: uppercase;">
+                                {labels[idx]}
+                            </div>
+                            <div style="font-size: 1.25rem; font-weight: bold; color: inherit; margin-top: 0.2rem; margin-bottom: 0.2rem;">
+                                {district_name}
+                            </div>
+                            <div style="font-size: 0.85rem; color: inherit; margin-bottom: 0.5rem;">
+                                Количество инцидентов: <b>{row['count']}</b>
+                            </div>
+                            <div style="font-size: 0.82rem; font-style: italic; color: #475569; border-top: 1px solid rgba(128,128,128,0.15); padding-top: 0.5rem; text-align: left; line-height: 1.4;">
+                                <b>Анализ проблем (ИИ):</b><br>
+                                {row['key_problems']}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                col_charts_1, col_charts_2 = st.columns(2)
+                
+                with col_charts_1:
+                    st.markdown("##### Топ-10 районов Омской области по числу проблем")
+                    
+                    chart_data = []
+                    for item in stats["top10_districts"]:
+                        district_name = item["district"].replace(" р-н", "").replace(" рн", "").replace(" район", "").replace(" немецкий национальный", "").replace(" г. Омск", "Омск").replace("г. Омск", "Омск")
+                        chart_data.append({"Район": district_name, "Количество": item["count"]})
+                    chart_df = pd.DataFrame(chart_data)
+                    
+                    st.vega_lite_chart(
+                        chart_df,
+                        {
+                            "mark": {"type": "bar", "color": "#1E3A8A"},
+                            "encoding": {
+                                "x": {
+                                    "field": "Район", 
+                                    "type": "nominal", 
+                                    "axis": {"labelAngle": 0, "labelOverlap": "hide"},
+                                    "title": "Район"
+                                },
+                                "y": {
+                                    "field": "Количество", 
+                                    "type": "quantitative",
+                                    "title": "Количество"
+                                }
                             },
-                            "y": {
-                                "field": "Количество", 
-                                "type": "quantitative",
-                                "title": "Количество"
-                            }
+                            "width": "container",
+                            "height": 380
                         },
-                        "width": "container",
-                        "height": 380
-                    },
-                    use_container_width=True
-                )
+                        use_container_width=True
+                    )
+                    
+                with col_charts_2:
+                    st.markdown("##### Распределение инцидентов по категориям")
+                    
+                    cat_data = []
+                    for cat, count in stats.get("category_counts", {}).items():
+                        cat_data.append({"Категория": cat, "Количество": count})
+                    
+                    if cat_data:
+                        cat_df = pd.DataFrame(cat_data).sort_values(by="Количество", ascending=False)
+                    else:
+                        cat_df = pd.DataFrame(columns=["Категория", "Количество"])
+                        
+                    st.dataframe(
+                        cat_df, 
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                    
+                st.markdown("##### Распределение проблем по рангам критичности")
                 
-            with col_charts_2:
-                st.markdown("##### Распределение инцидентов по категориям")
-                group_col_idx = find_column_index(df_res, "group", 21)
-                group_col_name = df_res.columns[group_col_idx]
-                category_counts = df_problems[group_col_name].value_counts().reset_index()
-                category_counts.columns = ["Категория", "Количество"]
+                rank_data = []
+                rank_desc = {
+                    1: "1 - Минимальный (Благодарности, мелкие плановые работы)",
+                    2: "2 - Низкий (Типовые недочеты, мелкие ямы, мусор во дворе)",
+                    3: "3 - Средний (Транспортные сбои, открытые люки, крупные ямы)",
+                    4: "4 - Высокий (Прорыв отопления, замерзаем, отключение света)",
+                    5: "5 - Критический (ЧП, пожары, взрывы, угроза жизни)"
+                }
+                for rank, count in stats.get("rank_counts", {}).items():
+                    rank_data.append({
+                        "Ранг критичности": int(rank),
+                        "Описание ранга": rank_desc.get(int(rank), f"{rank}"),
+                        "Количество обращений": count
+                    })
                 
+                if rank_data:
+                    rank_df = pd.DataFrame(rank_data).sort_values(by="Ранг критичности")
+                else:
+                    rank_df = pd.DataFrame(columns=["Описание ранга", "Количество обращений"])
+                    
                 st.dataframe(
-                    category_counts, 
+                    rank_df[["Описание ранга", "Количество обращений"]],
                     hide_index=True,
                     use_container_width=True
                 )
-                
-            st.markdown("##### Распределение проблем по рангам критичности")
-            rank_counts = df_problems["Ранг критичности"].value_counts().sort_index().reset_index()
-            rank_counts.columns = ["Ранг критичности", "Количество обращений"]
-            rank_desc = {
-                1: "1 - Минимальный (Благодарности, мелкие плановые работы)",
-                2: "2 - Низкий (Типовые недочеты, мелкие ямы, мусор во дворе)",
-                3: "3 - Средний (Транспортные сбои, открытые люки, крупные ямы)",
-                4: "4 - Высокий (Прорыв отопления, замерзаем, отключение света)",
-                5: "5 - Критический (ЧП, пожары, взрывы, угроза жизни)"
-            }
-            rank_counts["Описание ранга"] = rank_counts["Ранг критичности"].map(rank_desc)
-            st.dataframe(
-                rank_counts[["Описание ранга", "Количество обращений"]],
-                hide_index=True,
-                use_container_width=True
-            )
+            else:
+                st.info("Реальных проблем в реестре не найдено. Все записи отсеяны как нерелевантные.")
         else:
-            st.info("Реальных проблем в реестре не найдено. Все записи отсеяны как нерелевантные.")
+            st.info("Данные не найдены.")
     else:
         st.info("Для отображения аналитики необходимо загрузить и обработать файлы во вкладке 'Загрузка и обработка'.")
 
@@ -733,67 +927,68 @@ with tab_preview:
     st.subheader("Просмотр обработанных данных")
     
     if st.session_state.result_df is not None:
-        if selected_file == "Все файлы вместе":
-            df_res = st.session_state.result_df
-        else:
-            df_res = st.session_state.processed_files.get(selected_file, st.session_state.result_df)
-        processed_dir_path = os.path.join(save_dir, "Обработанные файлы")
-        st.info(f"Все обработанные отчеты сохранены на диск в директорию: {processed_dir_path}")
+        stats, preview_df = get_active_stats_and_preview(selected_file)
         
-        st.markdown("##### Таблица результатов (превью первых 100 строк)")
-        
-        df_clean = df_res.dropna(how='all', axis=1)
-        df_clean = df_clean.dropna(how='all', axis=0)
-        df_clean = df_clean.fillna("")
-        
-        if "CLASS_LABEL" in df_clean.columns:
-            df_clean = df_clean.drop(columns=["CLASS_LABEL"])
+        if preview_df is not None:
+            processed_dir_path = os.path.join(save_dir, "Обработанные файлы")
+            st.info(f"Все обработанные отчеты сохранены на диск в директорию: {processed_dir_path}")
             
-        def color_ranks(val):
-            try:
-                rank = int(val)
-                if rank == 1 or rank == 2:
-                    return 'background-color: rgba(46, 204, 113, 0.25);'
-                elif rank == 3:
-                    return 'background-color: rgba(241, 196, 15, 0.25);'
-                elif rank == 4:
-                    return 'background-color: rgba(230, 126, 34, 0.28);'
-                elif rank == 5:
-                    return 'background-color: rgba(231, 76, 60, 0.32);'
-            except Exception:
-                pass
-            return ''
-
-        if "Ранг критичности" in df_clean.columns:
-            try:
-                styled_df = df_clean.head(100).style.map(color_ranks, subset=["Ранг критичности"])
-            except AttributeError:
-                styled_df = df_clean.head(100).style.applymap(color_ranks, subset=["Ранг критичности"])
+            st.markdown("##### Таблица результатов (превью первых 100 строк)")
+            
+            df_clean = preview_df.dropna(how='all', axis=1)
+            df_clean = df_clean.dropna(how='all', axis=0)
+            df_clean = df_clean.fillna("")
+            
+            if "CLASS_LABEL" in df_clean.columns:
+                df_clean = df_clean.drop(columns=["CLASS_LABEL"])
+                
+            def color_ranks(val):
+                try:
+                    rank = int(val)
+                    if rank == 1 or rank == 2:
+                        return 'background-color: rgba(46, 204, 113, 0.25);'
+                    elif rank == 3:
+                        return 'background-color: rgba(241, 196, 15, 0.25);'
+                    elif rank == 4:
+                        return 'background-color: rgba(230, 126, 34, 0.28);'
+                    elif rank == 5:
+                        return 'background-color: rgba(231, 76, 60, 0.32);'
+                except Exception:
+                    pass
+                return ''
+    
+            if "Ранг критичности" in df_clean.columns:
+                try:
+                    styled_df = df_clean.head(100).style.map(color_ranks, subset=["Ранг критичности"])
+                except AttributeError:
+                    styled_df = df_clean.head(100).style.applymap(color_ranks, subset=["Ранг критичности"])
+            else:
+                styled_df = df_clean.head(100)
+    
+            st.dataframe(
+                styled_df,
+                use_container_width=True,
+                hide_index=True,
+                height=700,
+                column_config={
+                    "Ранг критичности": st.column_config.NumberColumn(
+                        "Ранг критичности",
+                        help="От 1 (минимальный) до 5 (критический)",
+                        format="%d"
+                    ),
+                    "Тип инцидента": st.column_config.TextColumn(
+                        "Тип инцидента",
+                        help="Результат классификации: Проблема или Не проблема"
+                    ),
+                    "Нормализованное Гео": st.column_config.TextColumn(
+                        "Нормализованное Гео"
+                    ),
+                    "Краткое саммари": st.column_config.TextColumn(
+                        "Суть инцидента (Саммари)"
+                    )
+                }
+            )
         else:
-            styled_df = df_clean.head(100)
-
-        st.dataframe(
-            styled_df,
-            use_container_width=True,
-            hide_index=True,
-            height=700, # Увеличенная высота до конца экрана
-            column_config={
-                "Ранг критичности": st.column_config.NumberColumn(
-                    "Ранг критичности",
-                    help="От 1 (минимальный) до 5 (критический)",
-                    format="%d"
-                ),
-                "Тип инцидента": st.column_config.TextColumn(
-                    "Тип инцидента",
-                    help="Результат классификации: Проблема или Не проблема"
-                ),
-                "Нормализованное Гео": st.column_config.TextColumn(
-                    "Нормализованное Гео"
-                ),
-                "Краткое саммари": st.column_config.TextColumn(
-                    "Суть инцидента (Саммари)"
-                )
-            }
-        )
+            st.info("Превью недоступно.")
     else:
         st.info("Пожалуйста, сначала загрузите и обработайте файлы во вкладке 'Загрузка и обработка'.")

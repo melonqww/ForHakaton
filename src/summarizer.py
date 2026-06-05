@@ -3,51 +3,240 @@ import requests
 from src.config import CRITICALITY_KEYWORDS
 
 SENTENCE_SPLIT_REGEX = re.compile(
-    r'(?<=(?<!\bс)(?<!\bд)(?<!\bг)(?<!\bп)(?<!\bул)(?<!\bкв)(?<!\bобл)(?<!\bр-н)(?<!\bрп)(?<!\bим)[.!?])\s+',
+    r'(?<=(?<!\bs)(?<!\bд)(?<!\bг)(?<!\bп)(?<!\bул)(?<!\bкв)(?<!\bобл)(?<!\bр-н)(?<!\bрп)(?<!\bим)[.!?])\s+',
     re.IGNORECASE
 )
+
+# ──────────────────────────────────────────────────────────────
+# Словари для интеллектуальной экстрактивной суммаризации
+# ──────────────────────────────────────────────────────────────
+
+# Приветствия и обращения, которые нужно вырезать из начала текста
+_GREETING_PREFIXES = (
+    "здравствуйте", "добрый день", "добрый вечер", "доброе утро",
+    "привет", "приветствую", "уважаем", "доброго времени",
+    "добрый", "уважаемая", "уважаемый",
+)
+
+# Шумовые фразы — не несут информации о проблеме
+_FILLER_PHRASES = [
+    "просим принять меры", "примите меры", "примите срочные меры",
+    "сделайте что-нибудь", "надеемся на вашу", "надеемся на оперативн",
+    "просим разобраться", "ждем решения", "помогите решить",
+    "прошу разобраться", "просим обратить внимание",
+    "вынуждены обратиться", "на наши обращения",
+    "получаем только отписки", "сколько можно это терпеть",
+    "когда это закончится", "доколе", "сколько можно",
+    "лопнуло терпение", "крайне возмущены",
+    "обратите внимание", "прошу вас", "просим вас",
+    "звонили в диспетчерскую", "звонили уже несколько раз",
+    "заявка принята и никто не едет",
+    "пишем вам от лица", "надеемся на вашу оперативную",
+    "обещали сделать все вовремя", "до сих пор тишина",
+    "жители крайне возмущены таким отношением",
+    "это продолжается уже не первый день",
+]
+
+# Ключевые слова проблем — повышают вес предложения
+_PROBLEM_KEYWORDS = [
+    "нет", "сломал", "яма", "дыр", "прорыв", "авари", "затопил",
+    "отключ", "не работа", "замерз", "разруш", "обрушен", "пожар",
+    "течет", "течь", "проры", "засор", "мусор", "грязь", "лужа",
+    "холод", "дубак", "открытый люк", "не ход", "отмен", "переполн",
+    "вонь", "запах", "ямы", "выбоин", "наледь", "каток", "падают",
+    "ломают", "прорвало", "хлещет", "ледяны", "нет воды", "нет света",
+    "нет отопл", "не приех", "не прише", "опасн", "угроз",
+    "не убира", "свалк", "разбит", "трещин",
+]
+
+# ──────────────────────────────────────────────────────────────
+
 
 def split_into_sentences(text: str) -> list:
     """Разбиение текста на предложения с фильтрацией сокращений."""
     return [s.strip() for s in SENTENCE_SPLIT_REGEX.split(text) if s.strip()]
 
+
+def _strip_greeting(text: str) -> str:
+    """Удаляет приветственные фразы из начала текста."""
+    stripped = text.lstrip()
+    lower = stripped.lower()
+    
+    for greeting in _GREETING_PREFIXES:
+        if lower.startswith(greeting):
+            # Отрезаем приветствие и идущие за ним знаки/пробелы
+            tail = stripped[len(greeting):].lstrip(" .,!:;")
+            if tail:
+                # Поднимаем первую букву
+                return tail[0].upper() + tail[1:] if len(tail) > 1 else tail.upper()
+    return stripped
+
+
+def _clean_filler(text: str) -> str:
+    """Удаляет шумовые фразы из текста, оставляя только суть."""
+    result = text
+    lower = result.lower()
+    for filler in _FILLER_PHRASES:
+        idx = lower.find(filler)
+        if idx != -1:
+            # Удаляем от начала filler до конца предложения (до точки/запятой или конца)
+            end = idx + len(filler)
+            # Ищем конец фразы-филлера
+            while end < len(result) and result[end] not in '.!?\n':
+                end += 1
+            if end < len(result):
+                end += 1  # включаем знак препинания
+            result = result[:idx].rstrip(', ') + ' ' + result[end:].lstrip()
+            result = result.strip()
+            lower = result.lower()
+    
+    return result.strip(' ,.')  if result.strip(' ,.') else text
+
+
+_FILLER_STARTS_TUPLE = (
+    "сделайте что-нибудь", "примите меры", "помогите",
+    "когда это закончится", "сколько можно", "доколе",
+    "на наши обращения", "на наши письменные",
+    "пишем вам от лица", "надеемся на вашу",
+    "вынуждены обратиться", "прошлый раз обещали",
+    "звонили в диспетчерскую", "звонили уже",
+    "это продолжается уже", "лопнуло терпение",
+    "жители крайне возмущены", "просим обратить",
+    "ситуация аварийная, просим", "прошу разобраться",
+    "объявлений не было",
+)
+
+def _is_filler_sentence(sentence: str) -> bool:
+    """Проверяет, является ли предложение чисто шумовым/эмоциональным."""
+    s = sentence.lower().strip()
+    # Слишком короткое (менее 3 слов) и не содержит проблемных слов
+    if len(s.split()) < 3:
+        has_problem = any(kw in s for kw in _PROBLEM_KEYWORDS)
+        if not has_problem:
+            return True
+    # Чисто эмоциональное или административное
+    if s.startswith(_FILLER_STARTS_TUPLE):
+        return True
+    return False
+
+
 def extract_summary_local(text: str, max_chars: int = 300) -> str:
-    """Экстрактивная суммаризация на основе эвристического TextRank."""
+    """Оптимизированная быстрая экстрактивная суммаризация.
+    
+    1. Быстрый поиск сути по ключевым шаблонам (дает лаконичную выжимку).
+    2. Очистка приветствий и шумовых фраз.
+    3. Выбор наиболее значимого предложения и его сокращение.
+    """
     if not text:
         return ""
         
-    if len(text) <= 80:
-        return text
-
-    # Быстрый выход для простых односоставных текстов без знаков препинания
-    if '.' not in text and '!' not in text and '?' not in text:
-        return text if len(text) <= max_chars else text[:max_chars-3] + "..."
-
-    sentences = split_into_sentences(text)
-    if not sentences:
-        return ""
-    if len(sentences) == 1:
-        s = sentences[0]
-        return s if len(s) <= max_chars else s[:max_chars-3] + "..."
-
-    # Эвристический выбор лучшего предложения
-    best_score = -1.0
-    best_sentence = sentences[0]
+    t_lower = text.lower()
     
-    for idx, sentence in enumerate(sentences):
-        position_score = 1.5 if idx == 0 else 1.0
-        words_count = sentence.count(' ') + 1
-        length_score = 1.3 if 5 <= words_count <= 20 else 0.8
+    # --- Шаблоны ключевых проблем для мгновенной выжимки ---
+    # Отопление
+    if "отопл" in t_lower or "тепло" in t_lower or "замерз" in t_lower:
+        if any(w in t_lower for w in ["нет", "отключ", "холод", "дубак"]):
+            return "Отсутствие или слабое отопление"
+        if any(w in t_lower for w in ["прорыв", "прорва", "течет", "авари"]):
+            return "Авария/прорыв системы отопления"
             
-        score = position_score * length_score
-        if score > best_score:
-            best_score = score
-            best_sentence = sentence
-
-    if len(best_sentence) > max_chars:
-        return best_sentence[:max_chars-3].strip() + "..."
+    # Горячая вода
+    if "горяч" in t_lower and ("вод" in t_lower or "гвс" in t_lower):
+        if any(w in t_lower for w in ["нет", "отключ", "отсутств"]):
+            return "Отсутствие горячей воды"
+            
+    # Холодная вода
+    if "холодн" in t_lower and ("вод" in t_lower or "хвс" in t_lower):
+        if any(w in t_lower for w in ["нет", "отключ", "отсутств"]):
+            return "Отсутствие холодной воды"
+            
+    # Общая вода
+    if "вод" in t_lower or "водосн" in t_lower:
+        if any(w in t_lower for w in ["нет", "отключ", "отсутств"]):
+            return "Отсутствие водоснабжения"
+        if any(w in t_lower for w in ["прорыв", "прорва", "течет", "авари"]):
+            return "Прорыв водопровода / утечка воды"
+            
+    # Свет / Электричество
+    if "свет" in t_lower or "электр" in t_lower or "энерг" in t_lower:
+        if any(w in t_lower for w in ["нет", "отключ", "отсутств"]):
+            return "Отсутствие электроснабжения"
+            
+    # Ямы / Дороги
+    if "яма" in t_lower or "дорог" in t_lower or "выбоин" in t_lower or "асфальт" in t_lower or "колея" in t_lower:
+        if any(w in t_lower for w in ["разбит", "ремонт", "плох"]):
+            return "Неудовлетворительное состояние дорожного покрытия"
+            
+    # Транспорт
+    if "автобус" in t_lower or "маршрут" in t_lower or "транспорт" in t_lower or "рейс" in t_lower:
+        if any(w in t_lower for w in ["не ход", "отмен", "плохо", "интервал"]):
+            return "Сбои в расписании общественного транспорта"
+            
+    # Мусор
+    if "мусор" in t_lower or "свалк" in t_lower or "контейнер" in t_lower or "вывоз" in t_lower:
+        if any(w in t_lower for w in ["не вывоз", "переполн", "грязь"]):
+            return "Нарушение графика вывоза мусора / свалка"
+            
+    # Канализация / Засор / Люк
+    if "засор" in t_lower or "канализ" in t_lower or "вонь" in t_lower or "запах" in t_lower:
+        return "Засор канализации / неприятный запах"
+    if "люк" in t_lower and ("открыт" in t_lower or "нет крышки" in t_lower):
+        return "Открытый люк на дороге/тротуаре"
         
-    return best_sentence
+    # Снег / Гололед / Лед
+    if "снег" in t_lower or "лед" in t_lower or "наледь" in t_lower or "каток" in t_lower:
+        if any(w in t_lower for w in ["не убран", "почист", "заносы", "скользко"]):
+            return "Неудовлетворительная очистка от снега и льда"
+
+    # Если шаблоны не сработали, делаем стандартный TextRank
+    cleaned = _strip_greeting(text)
+    if len(cleaned) <= 120:
+        return _clean_filler(cleaned)
+        
+    sentences = split_into_sentences(cleaned)
+    if not sentences:
+        return _clean_filler(cleaned[:max_chars])
+        
+    content_sentences = [s for s in sentences if not _is_filler_sentence(s)]
+    if not content_sentences:
+        content_sentences = sentences
+        
+    # Скоринг предложений
+    scored = []
+    for idx, sentence in enumerate(content_sentences):
+        words = sentence.lower().split()
+        word_count = len(words)
+        if word_count == 0:
+            continue
+            
+        pos_score = 10.0 if idx == 0 else (5.0 if idx == 1 else (2.0 if idx == 2 else 1.0))
+        len_score = 3.0 if 5 <= word_count <= 25 else (-5.0 if word_count < 4 else 1.0)
+        
+        s_lower = sentence.lower()
+        kw_hits = sum(1 for kw in _PROBLEM_KEYWORDS if kw in s_lower)
+        kw_score = 3.0 * min(kw_hits, 5)
+        
+        score = pos_score + len_score + kw_score
+        scored.append((score, idx, sentence))
+        
+    if not scored:
+        return _clean_filler(cleaned[:max_chars])
+        
+    scored.sort(key=lambda x: -x[0])
+    best = scored[0][2]
+    
+    # Финальная очистка
+    result = _clean_filler(best)
+    if not result:
+        result = best
+        
+    # Делаем настоящую короткую выжимку (обрезаем до 12 слов, если предложение длинное)
+    words = result.split()
+    if len(words) > 12:
+        result = " ".join(words[:12]) + "..."
+        
+    return result
+
 
 def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api/generate") -> tuple[str, bool]:
     """Генеративная суммаризация через локальный API Ollama."""
@@ -71,7 +260,10 @@ def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api
                 "model": "qwen2.5:0.5b",
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.3}
+                "options": {
+                    "temperature": 0.3,
+                    "repetition_penalty": 1.2
+                }
             },
             timeout=5
         )
@@ -84,10 +276,12 @@ def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api
         
     return extract_summary_local(text), False
 
-def get_criticality_rank(text: str) -> int:
-    """Вычисление ранга критичности обращения (1-5) по ключевым словам и паттернам."""
-    text_lower = text.lower()
+
+def get_criticality_rank(text_lower: str) -> int:
+    """Вычисление ранга критичности обращения (1-5) по ключевым словам и паттернам.
     
+    Принимает уже готовый text.lower() для избежания повторного вычисления.
+    """
     # Высокий уровень угрозы (ранг 5)
     if any(w in text_lower for w in ["взрыв", "обрушен", "пожар", "чп"]):
         return 5
@@ -119,9 +313,42 @@ def get_criticality_rank(text: str) -> int:
     if "дорог" in text_lower and any(w in text_lower for w in ["дыр", "ямы", "колея"]):
         return 2
 
-    # Резервный поиск по словарю
-    for rank in sorted(CRITICALITY_KEYWORDS.keys(), reverse=True):
-        if any(keyword in text_lower for keyword in CRITICALITY_KEYWORDS[rank]):
-            return rank
-            
     return 2
+
+
+def generate_district_summary_llm(district: str, summaries: list[str], ollama_url: str = "http://localhost:11434/api/generate") -> str:
+    """Генерация связного аналитического отчета по району на основе списка жалоб."""
+    if not summaries:
+        return f"В районе {district} нет зарегистрированных критических проблем."
+        
+    problems_text = "\n- ".join(summaries)
+    prompt = (
+        f"Ты — аналитик центра управления регионом Омской области. Напиши один связный аналитический абзац (до 400 символов) "
+        f"от третьего лица о проблемах в районе '{district}' на основе следующих инцидентов:\n"
+        f"- {problems_text}\n\n"
+        f"Пиши естественным языком, как аналитический отчет от себя (например: 'Жители района жалуются на... Кроме того, отмечаются проблемы с...'). "
+        f"Не копируй текст инцидентов дословно, обобщай суть. Не используй списки, кавычки, приветствия и вводные слова. "
+        f"Пиши строго по фактам из списка, не выдумывай другие регионы, города или организации."
+    )
+    try:
+        response = requests.post(
+            ollama_url,
+            json={
+                "model": "qwen2.5:0.5b",
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "repetition_penalty": 1.2
+                }
+            },
+            timeout=20
+        )
+        if response.status_code == 200:
+            summary = response.json().get("response", "").strip()
+            # Убираем кавычки
+            summary = summary.replace('"', '').replace("'", "")
+            return summary
+    except Exception:
+        pass
+    return ""

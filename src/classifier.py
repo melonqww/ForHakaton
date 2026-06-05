@@ -33,9 +33,8 @@ class RequestClassifier:
         with open(MODEL_PATH, "wb") as f:
             pickle.dump(pipeline, f)
 
-    def is_sarcastic_problem(self, text: str) -> bool:
-        text_lower = text.lower()
-        
+    def is_sarcastic_problem(self, text_lower: str) -> bool:
+        """Детекция саркастических жалоб. Принимает уже готовый text.lower()."""
         if "каток" in text_lower:
             bad_words = ["тротуар", "дорог", "улиц", "подъезд", "пешеход", "падают", "ломают", "травм", "наледь"]
             if any(w in text_lower for w in bad_words):
@@ -56,17 +55,20 @@ class RequestClassifier:
                 
         return False
 
-    def predict_single(self, text: str) -> str:
+    def predict_single(self, text: str, text_lower: str = None) -> str:
+        """Классификация одного текста. text_lower — опционально предвычисленный .lower()."""
         if not text:
             return "Не проблема"
 
-        if self.is_sarcastic_problem(text):
+        if text_lower is None:
+            text_lower = text.lower()
+
+        if self.is_sarcastic_problem(text_lower):
             return "Проблема"
 
         if self.model:
             return self.model.predict([text])[0]
 
-        text_lower = text.lower()
         if any(word in text_lower for word in GRATITUDE_WORDS):
             return "Не проблема"
             
@@ -75,15 +77,19 @@ class RequestClassifier:
 
         return "Проблема"
 
-    def predict(self, texts: list) -> list:
+    def predict(self, texts: list, texts_lower: list = None) -> list:
+        """Батчевая классификация. texts_lower — предвычисленные .lower() для каждого текста."""
+        if texts_lower is None:
+            texts_lower = [t.lower() for t in texts]
+            
         if self.model:
             raw_preds = self.model.predict(texts).tolist()
             results = []
-            for text, pred in zip(texts, raw_preds):
-                if pred == "Не проблема" and self.is_sarcastic_problem(text):
+            for text_lower, pred in zip(texts_lower, raw_preds):
+                if pred == "Не проблема" and self.is_sarcastic_problem(text_lower):
                     results.append("Проблема")
                 else:
                     results.append(pred)
             return results
         else:
-            return [self.predict_single(t) for t in texts]
+            return [self.predict_single(t, tl) for t, tl in zip(texts, texts_lower)]

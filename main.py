@@ -24,11 +24,17 @@ def main():
     if not classifier.model or args.retrain:
         print("Классификатор не обучен. Запуск обучения на входном файле...")
         try:
-            temp_df = pd.read_excel(args.input)
-            if "CLASS_LABEL" in temp_df.columns:
-                col_text = find_column_index(temp_df, "text", 36)
-                texts = temp_df.iloc[:, col_text].fillna("").astype(str).tolist()
+            # Читаем только одну строку для получения заголовков
+            header_df = pd.read_excel(args.input, nrows=1)
+            if "CLASS_LABEL" in header_df.columns:
+                col_text_idx = find_column_index(header_df, "text", 36)
+                col_text_name = header_df.columns[col_text_idx]
+                
+                # Загружаем только нужные две колонки и ограничиваем количество строк
+                temp_df = pd.read_excel(args.input, usecols=[col_text_name, "CLASS_LABEL"], nrows=50000)
+                texts = temp_df[col_text_name].fillna("").astype(str).tolist()
                 labels = temp_df["CLASS_LABEL"].fillna("Проблема").tolist()
+                
                 classifier.train(texts, labels)
                 print(f"Обучение завершено. Модель сохранена в {MODEL_PATH}")
             else:
@@ -45,8 +51,16 @@ def main():
         elapsed = time.time() - start
         print(f"Обработка завершена за {elapsed:.2f} сек! Результат сохранен в '{args.output}'")
         
-        result_df = pd.read_excel(args.output)
-        if "CLASS_LABEL" in result_df.columns:
+        # Читаем только нужные колонки для расчета метрик
+        header_out = pd.read_excel(args.output, nrows=1)
+        use_cols_out = []
+        if "CLASS_LABEL" in header_out.columns:
+            use_cols_out.append("CLASS_LABEL")
+        if "Тип инцидента" in header_out.columns:
+            use_cols_out.append("Тип инцидента")
+            
+        if "CLASS_LABEL" in header_out.columns and "Тип инцидента" in header_out.columns:
+            result_df = pd.read_excel(args.output, usecols=use_cols_out)
             from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
             y_true = result_df["CLASS_LABEL"].fillna("Проблема").tolist()
             y_pred = result_df["Тип инцидента"].tolist()

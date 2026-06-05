@@ -10,7 +10,10 @@ def find_column_index(df, key: str, default_idx: int) -> int:
         "text": ["текст инцидента", "текст обращения", "текст жалобы", "текст", "содержание", "обращение", "жалоба", "text", "comment"]
     }
     
-    col_names = [str(col).strip().lower() for col in df.columns]
+    if hasattr(df, 'columns'):
+        col_names = [str(col).strip().lower() for col in df.columns]
+    else:
+        col_names = [str(col).strip().lower() for col in df]
     
     # 1. Сначала ищем точное совпадение
     for kw in keywords.get(key, []):
@@ -43,7 +46,8 @@ def find_column_index(df, key: str, default_idx: int) -> int:
                 return idx
 
     # 4. Fallback к дефолтному индексу
-    if default_idx < len(df.columns):
+    limit = len(df.columns) if hasattr(df, 'columns') else len(df)
+    if default_idx < limit:
         return default_idx
         
     return default_idx
