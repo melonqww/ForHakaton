@@ -20,6 +20,8 @@ class StreamingExcelExporter:
         self.type_col = type_col + 1 if type_col is not None else None
         
         self.wb = openpyxl.Workbook(write_only=True)
+        self.ws_summary = self.wb.create_sheet("Сводка")
+        self.ws_summary.views.sheetView[0].showGridLines = True
         self.ws = self.wb.create_sheet("Данные")
         self.ws.views.sheetView[0].showGridLines = True
         
@@ -101,8 +103,8 @@ class StreamingExcelExporter:
             )
             self.ws.conditional_formatting.add(f"{rank_col_letter}2:{rank_col_letter}{self.row_count}", color_scale)
             
-        # Создание листа аналитической сводки
-        ws_summary = self.wb.create_sheet("Сводка")
+        # Использование ранее созданного листа аналитической сводки
+        ws_summary = self.ws_summary
         
         title_font = Font(name='Calibri', size=14, bold=True, color='2B4C7E')
         section_font = Font(name='Calibri', size=12, bold=True)

@@ -933,6 +933,38 @@ with tab_preview:
             processed_dir_path = os.path.join(save_dir, "Обработанные файлы")
             st.info(f"Все обработанные отчеты сохранены на диск в директорию: {processed_dir_path}")
             
+            # Кнопки скачивания
+            st.markdown("##### 📥 Скачать результаты в формате Excel")
+            if selected_file == "Все файлы вместе":
+                col_dl_left, col_dl_right = st.columns(2)
+                for i, filename in enumerate(st.session_state.processed_files.keys()):
+                    out_path = os.path.join(processed_dir_path, f"Обработанные_{filename}")
+                    if os.path.exists(out_path):
+                        with open(out_path, "rb") as f:
+                            file_bytes = f.read()
+                        target_col = col_dl_left if i % 2 == 0 else col_dl_right
+                        with target_col:
+                            st.download_button(
+                                label=f"Скачать Excel: {filename}",
+                                data=file_bytes,
+                                file_name=f"Обработанный_{filename}",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_{filename}"
+                            )
+            else:
+                out_path = os.path.join(processed_dir_path, f"Обработанные_{selected_file}")
+                if os.path.exists(out_path):
+                    with open(out_path, "rb") as f:
+                        file_bytes = f.read()
+                    st.download_button(
+                        label=f"Скачать Excel: {selected_file}",
+                        data=file_bytes,
+                        file_name=f"Обработанный_{selected_file}",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_single_{selected_file}"
+                    )
+            
+            st.markdown("---")
             st.markdown("##### Таблица результатов (превью первых 100 строк)")
             
             df_clean = preview_df.dropna(how='all', axis=1)
