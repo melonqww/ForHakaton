@@ -120,17 +120,20 @@ def _is_filler_sentence(sentence: str) -> bool:
     return False
 
 
-def extract_summary_local(text: str, max_chars: int = 300) -> str:
+def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = None) -> str:
     """Оптимизированная быстрая экстрактивная суммаризация.
-    
+
     1. Быстрый поиск сути по ключевым шаблонам (дает лаконичную выжимку).
     2. Очистка приветствий и шумовых фраз.
     3. Выбор наиболее значимого предложения и его сокращение.
+
+    text_lower — предвычисленный text.lower() (опционально).
+    Если передан, повторный .lower() внутри функции не вызывается.
     """
     if not text:
         return ""
-        
-    t_lower = text.lower()
+
+    t_lower = text_lower if text_lower is not None else text.lower()
     
     # --- Шаблоны ключевых проблем для мгновенной выжимки ---
     # Отопление

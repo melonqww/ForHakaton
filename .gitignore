@@ -3,16 +3,25 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.pdb
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
 
 # IDEs
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Virtual environments
 venv/
@@ -20,18 +29,41 @@ venv/
 env/
 ENV/
 
+# Streamlit
+.streamlit/
+
 # Hackathon / Data / Intermediate Files
 Архитектура Проекта Хакатон/
 Обработанные файлы/
 cases_synthetic.xlsx
-temp_bench_*
 src/classifier.pkl
 *.pkl
 scratch/
-*.xlsx
 
-# Log files
+# Большие Excel-файлы с данными (не исходный код)
+*.xlsx
+*.xls
+*.csv
+
+# Временные файлы
+temp_*
+*_temp.*
+~$*
+
+# Ollama установщик (скачивается автоматически)
+OllamaSetup.exe
+ollama*.exe
+
+# Логи
 *.log
+*.log.*
+logs/
+
+# Сборка / dist
+build/
+dist/
+*.egg-info/
+.eggs/
 
 # CSV-кэши (генерируются автоматически при первом запуске)
-*_cache7.csv
+*_cache*.csv
