@@ -363,7 +363,7 @@ st.sidebar.markdown(f"""
 
 use_llm = st.sidebar.checkbox(
     "Суммаризация через локальную LLM (Ollama)",
-    value=False,
+    value=True,
     help="Использовать Qwen2.5 для генерации саммари. Если выключено — используется сверхбыстрый TextRank."
 )
 
@@ -371,15 +371,6 @@ ollama_url = st.sidebar.text_input(
     "Ollama API URL",
     value="http://localhost:11434/api/generate",
     disabled=not use_llm
-)
-
-max_workers = st.sidebar.slider(
-    "Количество потоков LLM",
-    min_value=1,
-    max_value=32,
-    value=8,
-    disabled=not use_llm,
-    help="Параллельные запросы к локальной LLM для увеличения скорости обработки"
 )
 
 # Панель автонастройки и статуса Ollama
@@ -726,7 +717,6 @@ with tab_upload:
                         output_path, 
                         use_llm=use_llm, 
                         ollama_url=ollama_url, 
-                        max_workers=max_workers,
                         progress_callback=streamlit_progress_callback,
                         classifier=classifier
                     )
