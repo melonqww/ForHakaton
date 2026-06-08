@@ -671,7 +671,10 @@ with tab_upload:
                 try:
                     # Сначала читаем только одну строку для получения заголовков
                     first_file = files_queue[0]["input_path"]
-                    header_df = pd.read_excel(first_file, nrows=1)
+                    try:
+                        header_df = pd.read_excel(first_file, nrows=1, engine="calamine")
+                    except Exception:
+                        header_df = pd.read_excel(first_file, nrows=1)
                     col_text_idx = find_column_index(header_df, "text", 36)
                     col_text_name = header_df.columns[col_text_idx]
                     
@@ -683,7 +686,10 @@ with tab_upload:
                         
                     if target_col:
                         # Загружаем только нужные две колонки и ограничиваем количество строк
-                        temp_df = pd.read_excel(first_file, usecols=[col_text_name, target_col], nrows=20000)
+                        try:
+                            temp_df = pd.read_excel(first_file, usecols=[col_text_name, target_col], nrows=20000, engine="calamine")
+                        except Exception:
+                            temp_df = pd.read_excel(first_file, usecols=[col_text_name, target_col], nrows=20000)
                         texts = temp_df[col_text_name].fillna("").astype(str).tolist()
                         
                         if target_col == "Тип инцидента":

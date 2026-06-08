@@ -215,7 +215,10 @@ def run_pipeline(input_path: str, output_path: str, use_llm: bool = False,
     - Локальная LLM (Ollama) применяется только в конце для 10 Топ-районов.
     """
     # 1. Считываем только шапку через pandas
-    header_df = pd.read_excel(input_path, nrows=0)
+    try:
+        header_df = pd.read_excel(input_path, nrows=0, engine="calamine")
+    except Exception:
+        header_df = pd.read_excel(input_path, nrows=0)
     headers = list(header_df.columns)
     
     # Поиск индексов исходных колонок
