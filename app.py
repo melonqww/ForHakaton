@@ -6,7 +6,7 @@ import time
 from src.pipeline import run_pipeline
 from src.utils import find_column_index
 from src.classifier import RequestClassifier
-import src.ollama_helper as oh
+
 
 
 def get_subdirectories(path):
@@ -244,20 +244,23 @@ st.markdown("""
     
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
+        color: #FFFFFF;
     }
     
     .main-title {
         font-size: 2.25rem;
         font-weight: 700;
-        color: #1E3A8A;
+        color: #FFFFFF;
+
         margin-bottom: 0.2rem;
     }
     
     .subtitle {
         font-size: 1rem;
-        color: #475569;
+        color: #FFFFFF;
+
         margin-bottom: 1.5rem;
-        border-bottom: 2px solid #E2E8F0;
+        border-bottom: 2px solid rgba(255,255,255,0.2);
         padding-bottom: 1rem;
     }
     
@@ -305,11 +308,11 @@ if st.session_state.show_folder_picker:
 
 
 st.markdown('<div class="main-title">Управление качеством обратной связи</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Интеллектуальная система классификации, фильтрации и приоритизации обращений Минцифры Омской области</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Интеллектуальная система классификации, фильтрации и приоритизации обращений</div>', unsafe_allow_html=True)
 
-st.sidebar.header("Параметры анализа")
+st.sidebar.header("Параметры")
 
-st.sidebar.markdown("Настройки обработки текстовых инцидентов:")
+
 
 st.sidebar.markdown("**Папка для сохранения**")
 default_path_check = st.sidebar.checkbox(
@@ -361,94 +364,8 @@ st.sidebar.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-use_llm = st.sidebar.checkbox(
-    "Суммаризация через локальную LLM (Ollama)",
-    value=True,
-    help="Использовать Qwen2.5 для генерации саммари. Если выключено — используется сверхбыстрый TextRank."
-)
-
-ollama_url = st.sidebar.text_input(
-    "Ollama API URL",
-    value="http://localhost:11434/api/generate",
-    disabled=not use_llm
-)
-
-# Панель автонастройки и статуса Ollama
-if use_llm:
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Статус локального ИИ")
-    
-    is_running = oh.is_ollama_running(ollama_url)
-    
-    if is_running:
-        has_qwen = oh.has_model(ollama_url, "qwen2.5:0.5b")
-        if has_qwen:
-            st.sidebar.success("🟢 Ollama активна и готова к работе (модель qwen2.5:0.5b найдена)")
-        else:
-            st.sidebar.warning("🟡 Ollama запущена, но модель qwen2.5:0.5b отсутствует.")
-            
-            # Автоматическое скачивание модели в фоне
-            if not oh.OLLAMA_STATUS["pulling_model"] and not oh.OLLAMA_STATUS["pull_done"] and not oh.OLLAMA_STATUS["pull_error"]:
-                st.sidebar.info("📥 Запуск фонового скачивания модели qwen2.5:0.5b...")
-                oh.pull_model_background(ollama_url, "qwen2.5:0.5b")
-                st.rerun()
-                
-            if oh.OLLAMA_STATUS["pulling_model"]:
-                st.sidebar.info(f"⏳ Скачивание модели: {oh.OLLAMA_STATUS['pull_progress']}")
-                time.sleep(1.5)
-                st.rerun()
-            elif oh.OLLAMA_STATUS["pull_done"]:
-                st.sidebar.success("✅ Модель qwen2.5:0.5b успешно загружена!")
-                time.sleep(1.0)
-                st.rerun()
-            elif oh.OLLAMA_STATUS["pull_error"]:
-                st.sidebar.error(f"❌ Ошибка скачивания модели: {oh.OLLAMA_STATUS['pull_error']}")
-                if st.sidebar.button("Повторить загрузку модели"):
-                    oh.OLLAMA_STATUS["pull_error"] = None
-                    oh.pull_model_background(ollama_url, "qwen2.5:0.5b")
-                    st.rerun()
-    else:
-        installed_path = oh.find_ollama_path()
-        if installed_path:
-            st.sidebar.warning("🟡 Ollama установлена, но не запущен сервис. Пытаемся запустить...")
-            started = oh.start_ollama_local()
-            if started:
-                st.sidebar.info("⏳ Запуск службы Ollama...")
-                time.sleep(3.0)
-                st.rerun()
-            else:
-                st.sidebar.error("❌ Не удалось запустить Ollama автоматически. Запустите её вручную.")
-        else:
-            st.sidebar.error("🔴 Ollama не установлена на компьютере.")
-            
-            # Автоматическое скачивание установщика в фоне
-            if not oh.OLLAMA_STATUS["downloading_setup"] and not oh.OLLAMA_STATUS["download_done"] and not oh.OLLAMA_STATUS["download_error"]:
-                st.sidebar.info("📥 Запуск фонового скачивания OllamaSetup.exe...")
-                oh.download_ollama_setup_background(os.getcwd())
-                st.rerun()
-                
-            if oh.OLLAMA_STATUS["downloading_setup"]:
-                progress_pct = oh.OLLAMA_STATUS["download_progress"]
-                st.sidebar.info(f"⏳ Скачивание OllamaSetup.exe ({progress_pct*100:.1f}%)")
-                st.sidebar.progress(progress_pct)
-                time.sleep(1.5)
-                st.rerun()
-            elif oh.OLLAMA_STATUS["download_done"]:
-                st.sidebar.success("✅ OllamaSetup.exe успешно скачан в папку проекта!")
-                st.sidebar.info("Запустите OllamaSetup.exe из папки проекта для установки.")
-            elif oh.OLLAMA_STATUS["download_error"]:
-                st.sidebar.error(f"❌ Ошибка при скачивании установщика: {oh.OLLAMA_STATUS['download_error']}")
-                if st.sidebar.button("Повторить скачивание установщика"):
-                    oh.OLLAMA_STATUS["download_error"] = None
-                    oh.download_ollama_setup_background(os.getcwd())
-                    st.rerun()
-
-    st.sidebar.markdown("---")
-
-st.sidebar.info(
-    "Бинарный классификатор спама обучается автоматически на входящих размеченных данных "
-    "и отсекает благодарности/информационные запросы от реальных проблем."
-)
+use_llm = True
+ollama_url = "http://localhost:11434/api/generate"
 
 selected_file = "Все файлы вместе"
 if st.session_state.processed_files:
@@ -552,10 +469,11 @@ def get_active_stats_and_preview(selected_file):
             return f_data["stats"], f_data["preview_df"]
         return None, None
 
+
 tab_upload, tab_analytics, tab_preview = st.tabs([
-    "Загрузка и обработка", 
-    "Аналитика инцидентов", 
-    "Просмотр результатов"
+    "Загрузить",
+    "Результаты",
+    "Таблица"
 ])
 
 with tab_upload:
@@ -565,58 +483,48 @@ with tab_upload:
         "нормализацию географических названий, маскирование конфиденциальных данных и расчитает ранг критичности."
     )
     
-    input_source = st.radio("Источник данных:", ["Загрузить через браузер", "Выбрать локальный файл из проекта/диска"], horizontal=True)
+    uploaded_files = st.file_uploader(
+        "Выберите файлы Excel",
+        type=["xlsx"],
+        accept_multiple_files=True,
+    ) or []
     
-    uploaded_files = []
+    local_xlsx_files = []
+    try:
+        local_xlsx_files = [f for f in os.listdir(os.getcwd()) if f.endswith('.xlsx') and not f.startswith('~$') and not f.startswith('temp_')]
+        local_xlsx_files.sort()
+    except Exception:
+        pass
+    
+    custom_file_path = st.text_input("Или укажите путь к файлу на диске:")
+    selected_local_files = []
     local_files_to_process = []
     
-    if input_source == "Загрузить через браузер":
-        uploaded_files = st.file_uploader(
-            "Выберите файлы Excel", 
-            type=["xlsx"],
-            accept_multiple_files=True,
-            help="Таблицы должны содержать колонки с датой создания, текстом обращения и районом."
-        )
-        if uploaded_files:
-            st.success(f"Файлы успешно загружены в очередь (всего: {len(uploaded_files)}).")
-    else:
-        # Поиск xlsx в текущей папке
-        local_xlsx_files = []
-        try:
-            local_xlsx_files = [f for f in os.listdir(os.getcwd()) if f.endswith('.xlsx') and not f.startswith('~$') and not f.startswith('temp_')]
-            local_xlsx_files.sort()
-        except Exception:
-            pass
-            
-        st.markdown("**Доступные локальные файлы Excel в папке проекта:**")
+    if local_xlsx_files or custom_file_path:
+        st.markdown("**Локальные файлы:**")
         if local_xlsx_files:
             selected_local_files = st.multiselect(
-                "Выберите файлы для обработки:",
+                "Выберите файлы из папки проекта:",
                 options=local_xlsx_files,
                 default=[f for f in local_xlsx_files if "prod" in f or "real" in f] or ([local_xlsx_files[0]] if local_xlsx_files else [])
             )
-        else:
-            selected_local_files = []
-            st.info("В текущей папке проекта не найдено файлов .xlsx.")
-            
-        custom_file_path = st.text_input("Или введите абсолютный путь к файлу на диске:")
         if custom_file_path:
             cleaned_path = custom_file_path.strip().strip('"').strip("'")
             if os.path.exists(cleaned_path) and cleaned_path.endswith('.xlsx'):
                 if cleaned_path not in selected_local_files:
                     selected_local_files.append(cleaned_path)
-            else:
-                st.error("Файл по указанному пути не найден или имеет неверный формат.")
-                
+            elif cleaned_path:
+                st.error("Файл не найден или неверный формат.")
+    
         if selected_local_files:
-            st.success(f"Выбрано локальных файлов для обработки: {len(selected_local_files)}")
+            st.success(f"Выбрано: {len(selected_local_files)} файлов")
             for f in selected_local_files:
                 if os.path.isabs(f):
                     local_files_to_process.append({"name": os.path.basename(f), "path": f})
                 else:
                     local_files_to_process.append({"name": f, "path": os.path.abspath(f)})
-                    
-    has_files = (input_source == "Загрузить через браузер" and uploaded_files) or (input_source == "Выбрать локальный файл из проекта/диска" and local_files_to_process)
+    
+    has_files = len(uploaded_files) > 0 or len(local_files_to_process) > 0
     
     if has_files:
         if st.button("Начать обработку данных", type="primary"):
@@ -635,32 +543,28 @@ with tab_upload:
             status_text.text("Подготовка классификатора обращений...")
             classifier = RequestClassifier()
             
-            # Собираем список файлов для обработки
             files_queue = []
-            if input_source == "Загрузить через браузер":
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    temp_input_path = os.path.join(processed_dir, f"temp_in_{uploaded_file.name}")
-                    with open(temp_input_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    files_queue.append({
-                        "name": uploaded_file.name,
-                        "input_path": temp_input_path,
-                        "output_path": os.path.join(processed_dir, f"Обработанные_{uploaded_file.name}"),
-                        "is_temp": True
-                    })
-            else:
-                for f_info in local_files_to_process:
-                    files_queue.append({
-                        "name": f_info["name"],
-                        "input_path": f_info["path"],
-                        "output_path": os.path.join(processed_dir, f"Обработанные_{f_info['name']}"),
-                        "is_temp": False
-                    })
+            for uploaded_file in uploaded_files:
+                temp_input_path = os.path.join(processed_dir, f"temp_in_{uploaded_file.name}")
+                with open(temp_input_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                files_queue.append({
+                    "name": uploaded_file.name,
+                    "input_path": temp_input_path,
+                    "output_path": os.path.join(processed_dir, f"Обработанные_{uploaded_file.name}"),
+                    "is_temp": True
+                })
+            for f_info in local_files_to_process:
+                files_queue.append({
+                    "name": f_info["name"],
+                    "input_path": f_info["path"],
+                    "output_path": os.path.join(processed_dir, f"Обработанные_{f_info['name']}"),
+                    "is_temp": False
+                })
             
             if not classifier.model and files_queue:
                 status_text.text("Обучение модели классификатора на первом наборе данных...")
                 try:
-                    # Сначала читаем только одну строку для получения заголовков
                     first_file = files_queue[0]["input_path"]
                     try:
                         header_df = pd.read_excel(first_file, nrows=1, engine="calamine")
@@ -676,7 +580,6 @@ with tab_upload:
                         target_col = "Тип инцидента"
                         
                     if target_col:
-                        # Загружаем только нужные две колонки и ограничиваем количество строк
                         try:
                             temp_df = pd.read_excel(first_file, usecols=[col_text_name, target_col], nrows=20000, engine="calamine")
                         except Exception:
@@ -723,7 +626,6 @@ with tab_upload:
                     
                     processed_file_names.append((name, {"stats": stats, "preview_df": file_df}))
                     
-                    # Удаляем временный входной файл
                     if f_item["is_temp"] and os.path.exists(input_path):
                         os.remove(input_path)
                 
@@ -742,28 +644,26 @@ with tab_upload:
                 
                 st.success(
                     f"Все файлы успешно обработаны за {elapsed:.2f} сек. "
-                    f"Результаты сохранены в папку: {processed_dir}. "
-                    f"Перейдите во вкладку 'Аналитика инцидентов' или 'Просмотр результатов'."
+                    f"Результаты сохранены в папку: {processed_dir}."
                 )
                     
             except Exception as e:
                 st.error(f"Ошибка в процессе обработки: {e}")
-                # Чистим временные файлы в случае ошибки
                 for f_item in files_queue:
                     if f_item["is_temp"] and os.path.exists(f_item["input_path"]):
                         os.remove(f_item["input_path"])
     else:
         st.info("Пожалуйста, загрузите файлы или выберите локальный файл из списка.")
 
+
 with tab_analytics:
-    st.subheader("Аналитическая сводка по инцидентам")
-    
+
     if st.session_state.result_df is not None:
         stats, preview_df = get_active_stats_and_preview(selected_file)
-        
+    
         if stats is not None:
             kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-            
+        
             with kpi1:
                 st.markdown(
                     f'<div class="metric-container"><div class="metric-val">{stats["total_count"]}</div>'
@@ -789,18 +689,18 @@ with tab_analytics:
                     f'<div class="metric-lbl">Время обработки</div></div>', 
                     unsafe_allow_html=True
                 )
-                
-            st.markdown("<br>", unsafe_allow_html=True)
             
+            st.markdown("<br>", unsafe_allow_html=True)
+        
             if stats["problems_count"] > 0:
                 st.markdown("##### Лидеры по количеству инцидентов (Топ-3)")
-                
+            
                 cols_top3 = st.columns(min(3, len(stats["top3_districts"])))
                 labels = ["1-е место", "2-е место", "3-е место"]
                 colors = ["transparent", "transparent", "transparent"]
                 border_colors = ["rgba(128, 128, 128, 0.25)", "rgba(128, 128, 128, 0.25)", "rgba(128, 128, 128, 0.25)"]
                 text_colors = ["inherit", "inherit", "inherit"]
-                
+            
                 for idx, row in enumerate(stats["top3_districts"]):
                     if idx >= len(cols_top3):
                         break
@@ -824,26 +724,26 @@ with tab_analytics:
                             <div style="font-size: 0.85rem; color: inherit; margin-bottom: 0.5rem;">
                                 Количество инцидентов: <b>{row['count']}</b>
                             </div>
-                            <div style="font-size: 0.82rem; font-style: italic; color: #475569; border-top: 1px solid rgba(128,128,128,0.15); padding-top: 0.5rem; text-align: left; line-height: 1.4;">
+                            <div style="font-size: 0.82rem; font-style: italic; color: inherit; border-top: 1px solid rgba(128,128,128,0.15); padding-top: 0.5rem; text-align: left; line-height: 1.4;">
                                 <b>Анализ проблем (ИИ):</b><br>
                                 {row['key_problems']}
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-                
+            
                 st.markdown("<br>", unsafe_allow_html=True)
-                
+            
                 col_charts_1, col_charts_2 = st.columns(2)
-                
+            
                 with col_charts_1:
                     st.markdown("##### Топ-10 районов Омской области по числу проблем")
-                    
+                
                     chart_data = []
                     for item in stats["top10_districts"]:
                         district_name = item["district"].replace(" р-н", "").replace(" рн", "").replace(" район", "").replace(" немецкий национальный", "").replace(" г. Омск", "Омск").replace("г. Омск", "Омск")
                         chart_data.append({"Район": district_name, "Количество": item["count"]})
                     chart_df = pd.DataFrame(chart_data)
-                    
+                
                     st.vega_lite_chart(
                         chart_df,
                         {
@@ -866,27 +766,27 @@ with tab_analytics:
                         },
                         use_container_width=True
                     )
-                    
+                
                 with col_charts_2:
                     st.markdown("##### Распределение инцидентов по категориям")
-                    
+                
                     cat_data = []
                     for cat, count in stats.get("category_counts", {}).items():
                         cat_data.append({"Категория": cat, "Количество": count})
-                    
+                
                     if cat_data:
                         cat_df = pd.DataFrame(cat_data).sort_values(by="Количество", ascending=False)
                     else:
                         cat_df = pd.DataFrame(columns=["Категория", "Количество"])
-                        
+                    
                     st.dataframe(
                         cat_df, 
                         hide_index=True,
                         use_container_width=True
                     )
-                    
-                st.markdown("##### Распределение проблем по рангам критичности")
                 
+                st.markdown("##### Распределение проблем по рангам критичности")
+            
                 rank_data = []
                 rank_desc = {
                     1: "1 - Минимальный (Благодарности, мелкие плановые работы)",
@@ -901,12 +801,12 @@ with tab_analytics:
                         "Описание ранга": rank_desc.get(int(rank), f"{rank}"),
                         "Количество обращений": count
                     })
-                
+            
                 if rank_data:
                     rank_df = pd.DataFrame(rank_data).sort_values(by="Ранг критичности")
                 else:
                     rank_df = pd.DataFrame(columns=["Описание ранга", "Количество обращений"])
-                    
+                
                 st.dataframe(
                     rank_df[["Описание ранга", "Количество обращений"]],
                     hide_index=True,
@@ -917,18 +817,19 @@ with tab_analytics:
         else:
             st.info("Данные не найдены.")
     else:
-        st.info("Для отображения аналитики необходимо загрузить и обработать файлы во вкладке 'Загрузка и обработка'.")
+        st.info("Для отображения аналитики необходимо загрузить и обработать файлы.")
+
+
 
 with tab_preview:
-    st.subheader("Просмотр обработанных данных")
-    
+
     if st.session_state.result_df is not None:
         stats, preview_df = get_active_stats_and_preview(selected_file)
-        
+    
         if preview_df is not None:
             processed_dir_path = os.path.join(save_dir, "Обработанные файлы")
             st.info(f"Все обработанные отчеты сохранены на диск в директорию: {processed_dir_path}")
-            
+        
             # Кнопки скачивания
             st.markdown("##### 📥 Скачать результаты в формате Excel")
             if selected_file == "Все файлы вместе":
@@ -959,17 +860,17 @@ with tab_preview:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key=f"dl_single_{selected_file}"
                     )
-            
+        
             st.markdown("---")
             st.markdown("##### Таблица результатов (превью первых 100 строк)")
-            
+        
             df_clean = preview_df.dropna(how='all', axis=1)
             df_clean = df_clean.dropna(how='all', axis=0)
             df_clean = df_clean.fillna("")
-            
+        
             if "CLASS_LABEL" in df_clean.columns:
                 df_clean = df_clean.drop(columns=["CLASS_LABEL"])
-                
+            
             def color_ranks(val):
                 try:
                     rank = int(val)
@@ -984,7 +885,7 @@ with tab_preview:
                 except Exception:
                     pass
                 return ''
-    
+
             if "Ранг критичности" in df_clean.columns:
                 try:
                     styled_df = df_clean.head(100).style.map(color_ranks, subset=["Ранг критичности"])
@@ -992,7 +893,7 @@ with tab_preview:
                     styled_df = df_clean.head(100).style.applymap(color_ranks, subset=["Ранг критичности"])
             else:
                 styled_df = df_clean.head(100)
-    
+
             st.dataframe(
                 styled_df,
                 use_container_width=True,
@@ -1019,4 +920,4 @@ with tab_preview:
         else:
             st.info("Превью недоступно.")
     else:
-        st.info("Пожалуйста, сначала загрузите и обработайте файлы во вкладке 'Загрузка и обработка'.")
+        st.info("Пожалуйста, сначала загрузите и обработайте файлы.")
