@@ -47,6 +47,21 @@ _PROBLEM_KEYWORDS = [
     "ломают", "прорвало", "хлещет", "ледяны", "нет воды", "нет света",
     "нет отопл", "не приех", "не прише", "опасн", "угроз",
     "не убира", "свалк", "разбит", "трещин",
+    # Медицина
+    "врач", "скорая", "больниц", "поликлиник", "приём", "прием",
+    "запись", "очередь", "медик", "фельдшер", "аптек", "лекарств",
+    "скорую", "не принима", "не приехала",
+    # Снег / уборка территории
+    "снег", "уборк", "чист", "подмет", "двор", "гололед", "сугроб",
+    "не расчист", "не посыпа", "тротуар",
+    # Парковка / дороги
+    "парков", "стоянк", "машин", "автомобил", "пробк",
+    # Администрация / управление
+    "контрол", "поруч", "обеспеч", "реагиру", "не реагир",
+    # Связь / интернет / газ
+    "газ", "газоснабж", "интернет", "связь", "сигнал",
+    # Благоустройство
+    "детск", "площадк", "фонар", "освещен", "лавочк", "скамейк",
 ]
 
 # ──────────────────────────────────────────────────────────────
@@ -104,11 +119,15 @@ _FILLER_STARTS_TUPLE = (
     "жители крайне возмущены", "просим обратить",
     "ситуация аварийная, просим", "прошу разобраться",
     "объявлений не было",
+    # Обращения к чиновникам — не несут сути проблемы
+    "виталий", "уважаемый губернатор", "уважаемый мэр",
+    "александр леонидович", "обратитесь к", "поручите мэру",
+    "возмитесь пожалуйста", "хотите город", "соболезнование",
 )
 
 def _is_filler_sentence(sentence: str) -> bool:
     """Проверяет, является ли предложение чисто шумовым/эмоциональным."""
-    s = sentence.lower().strip()
+    s = sentence.lower().strip().lstrip("'\"").strip()
     # Слишком короткое (менее 3 слов) и не содержит проблемных слов
     if len(s.split()) < 3:
         has_problem = any(kw in s for kw in _PROBLEM_KEYWORDS)
@@ -118,6 +137,71 @@ def _is_filler_sentence(sentence: str) -> bool:
     if s.startswith(_FILLER_STARTS_TUPLE):
         return True
     return False
+
+
+def _smart_truncate(text: str, max_words: int = 25) -> str:
+    """Умное обрезание: ищет естественную границу (запятую/союз) рядом с лимитом.
+    Не ставит '...' если текст и так заканчивается нормально.
+    """
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    # Ищем хорошую точку обрыва: запятую или союз чуть раньше лимита
+    _BREAK_WORDS = {"и", "но", "а", "или", "что", "где", "когда", "потому", "так", "также"}
+    # Сначала пробуем найти запятую в конце слова рядом с лимитом
+    for i in range(min(max_words, len(words)) - 1, max(max_words - 6, 3), -1):
+        w = words[i].rstrip(",;")
+        if words[i].endswith(",") or words[i+1].lower() in _BREAK_WORDS:
+            return " ".join(words[:i+1]).rstrip(",") + "..."
+    # Иначе просто обрезаем по лимиту
+    return " ".join(words[:max_words]) + "..."
+
+
+# Диапазоны Unicode эмодзи для быстрой фильтрации
+_EMOJI_PATTERN = None
+
+
+def _remove_emoji(text: str) -> str:
+    """Удаляет эмодзи и спецсимволы соцсетей из текста."""
+    global _EMOJI_PATTERN
+    import re
+    if _EMOJI_PATTERN is None:
+        _EMOJI_PATTERN = re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # эмодзи лиц
+            "\U0001F300-\U0001F5FF"  # символы/картинки
+            "\U0001F680-\U0001F6FF"  # транспорт
+            "\U0001F1E0-\U0001F1FF"  # флаги
+            "\U00002702-\U000027B0"  # доп. символы
+            "\U000024C2-\U0001F251"  # прочие
+            "\U0001f926-\U0001f937"  # жесты
+            "\U00010000-\U0010ffff"  # прочие блоки
+            "\u2640-\u2642"          # символы пола
+            "\u2600-\u2B55"          # разное
+            "\u200d"                 # zero-width joiner
+            "\u23cf\u23e9\u231a\ufe0f\u3030"
+            "]+",
+            re.UNICODE
+        )
+    return _EMOJI_PATTERN.sub('', text).strip()
+
+
+def _clean_leading_junk(text: str) -> str:
+    """Убирает мусор: эмодзи, апостроф, кавычки, VK-теги, HTML, спецсимволы соцсетей."""
+    import re
+    # Убираем HTML-теги (<br>, <br/>, <p> и т.д.)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Убираем '[club12345|Название]' и '@упоминания' паттерны ВКонтакте
+    text = re.sub(r'\[club\d+\|[^\]]+\],?\s*', '', text)
+    text = re.sub(r'\[id\d+\|[^\]]+\],?\s*', '', text)  # [id123|Имя]
+    text = re.sub(r'@[\w]+,?\s*', '', text)              # @username
+    # Убираем эмодзи из всего текста
+    text = _remove_emoji(text)
+    # Убираем ведущие не-буквенные символы (включая апостроф в начале)
+    text = text.lstrip("'\"«»!?,. ")
+    # Схлопываем множественные пробелы
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 
 def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = None) -> str:
@@ -132,6 +216,15 @@ def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = Non
     """
     if not text:
         return ""
+
+    # --- Fallback для очень коротких текстов (<50 символов) ---
+    # Чистим и берём текст напрямую как саммари (без LLM/шаблонов)
+    stripped_text = _clean_leading_junk(text.strip())
+    if len(stripped_text) < 50:
+        if not stripped_text:
+            return ""
+        result = stripped_text[0].upper() + stripped_text[1:] if len(stripped_text) > 1 else stripped_text.upper()
+        return result
 
     t_lower = text_lower if text_lower is not None else text.lower()
     
@@ -165,20 +258,81 @@ def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = Non
         if any(w in t_lower for w in ["нет", "отключ", "отсутств"]):
             return "Отсутствие электроснабжения"
             
+    # Железнодорожный переезд / барьеры
+    if "переезд" in t_lower:
+        if any(w in t_lower for w in ["барьер", "шлагбаум", "не закрыва", "сломан", "не работа"]):
+            return "Неисправные барьеры/шлагбаум на железнодорожном переезде"
+        if any(w in t_lower for w in ["асфальт", "яма", "разбит", "плохой"]):
+            return "Неудовлетворительное состояние дорог на переезде"
+        return "Проблемы на железнодорожном переезде"
+
+    # Барьеры / шлагбаумы вне переезда
+    if "барьер" in t_lower or "шлагбаум" in t_lower:
+        if any(w in t_lower for w in ["сломан", "не работа", "не закрыва", "не открыва"]):
+            return "Неисправный барьер/шлагбаум"
+
     # Ямы / Дороги
     if "яма" in t_lower or "дорог" in t_lower or "выбоин" in t_lower or "асфальт" in t_lower or "колея" in t_lower:
-        if any(w in t_lower for w in ["разбит", "ремонт", "плох"]):
+        if any(w in t_lower for w in ["разбит", "ремонт", "плох", "ужасн", "яма", "выбоин"]):
             return "Неудовлетворительное состояние дорожного покрытия"
-            
+        if any(w in t_lower for w in ["не чист", "снег", "грязь", "лужа"]):
+            return "Неудовлетворительная уборка дорог"
+
+    # Мост / путепровод
+    if "мост" in t_lower or "путепровод" in t_lower:
+        if any(w in t_lower for w in ["дыр", "яма", "разбит", "аварий", "опасн"]):
+            return "Аварийное состояние моста / путепровода"
+
+    # Тротуар
+    if "тротуар" in t_lower:
+        if any(w in t_lower for w in ["разбит", "яма", "нет", "плох", "снег", "лед", "наледь"]):
+            return "Неудовлетворительное состояние тротуара"
+
+    # Метро / пробки / транспортная перегруженность
+    if "метро" in t_lower:
+        if any(w in t_lower for w in ["нет", "нужн", "необходим", "пробк", "строит"]):
+            return "Отсутствие/необходимость метро, транспортные пробки"
+
+    if "пробк" in t_lower:
+        if any(w in t_lower for w in ["огромн", "стоим", "стоят", "час", "застрял"]):
+            return "Транспортные пробки"
+
     # Транспорт
     if "автобус" in t_lower or "маршрут" in t_lower or "транспорт" in t_lower or "рейс" in t_lower:
-        if any(w in t_lower for w in ["не ход", "отмен", "плохо", "интервал"]):
+        if any(w in t_lower for w in ["не ход", "отмен", "плохо", "интервал", "не прие"]):
             return "Сбои в расписании общественного транспорта"
+
+    # ЖКХ / управляющая компания
+    if "управляющ" in t_lower or " укп" in t_lower or "жкх" in t_lower or "ук " in t_lower:
+        if any(w in t_lower for w in ["не реагир", "не приход", "не делает", "бездейств", "игнорир"]):
+            return "Бездействие управляющей компании / ЖКХ"
+
+    # Лифт
+    if "лифт" in t_lower:
+        if any(w in t_lower for w in ["сломан", "не работа", "не ход", "застрял"]):
+            return "Неисправный лифт"
+
+    # Подъезд / дом
+    if "подъезд" in t_lower:
+        if any(w in t_lower for w in ["грязь", "мусор", "запах", "сломан", "не убира"]):
+            return "Антисанитария / запустение в подъезде"
+        if any(w in t_lower for w in ["дверь", "домофон", "замок", "не закрыва"]):
+            return "Неисправная дверь/домофон в подъезде"
+
+    # Крыша / подвал
+    if "крыш" in t_lower:
+        if any(w in t_lower for w in ["течет", "течь", "протека", "проваливает"]):
+            return "Протечка кровли"
+    if "подвал" in t_lower:
+        if any(w in t_lower for w in ["затопл", "вода", "течет", "запах", "крыс"]):
+            return "Подтопление/антисанитария в подвале"
             
     # Мусор
     if "мусор" in t_lower or "свалк" in t_lower or "контейнер" in t_lower or "вывоз" in t_lower:
-        if any(w in t_lower for w in ["не вывоз", "переполн", "грязь"]):
-            return "Нарушение графика вывоза мусора / свалка"
+        if any(w in t_lower for w in ["не вывоз", "переполн", "грязь", "не убира", "лежит", "собак", "раскидали", "завалили"]):
+            return "Нарушение графика вывоза мусора / антисанитария"
+        # Общий случай: упоминание мусора без конкретики — тоже возвращаем шаблон
+        return "Проблемы с вывозом мусора / несанкционированная свалка"
             
     # Канализация / Засор / Люк
     if "засор" in t_lower or "канализ" in t_lower or "вонь" in t_lower or "запах" in t_lower:
@@ -187,23 +341,114 @@ def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = Non
         return "Открытый люк на дороге/тротуаре"
         
     # Снег / Гололед / Лед
-    if "снег" in t_lower or "лед" in t_lower or "наледь" in t_lower or "каток" in t_lower:
-        if any(w in t_lower for w in ["не убран", "почист", "заносы", "скользко"]):
+    if "снег" in t_lower or "лед" in t_lower or "наледь" in t_lower or "каток" in t_lower or "гололед" in t_lower:
+        if any(w in t_lower for w in ["не убран", "почист", "заносы", "скользко", "уборк", "не чист", "не посыпа"]):
             return "Неудовлетворительная очистка от снега и льда"
+        if any(w in t_lower for w in ["упал", "упала", "упали", "поскользн", "травм"]):
+            return "Травма из-за гололёда / неубранного льда"
+
+    # Медицина — поликлиника / врач
+    if "поликлиник" in t_lower or "врач" in t_lower or "больниц" in t_lower:
+        if any(w in t_lower for w in ["нехватк", "нет специалист", "нет врач", "уволил", "медработник"]):
+            return "Нехватка медицинских специалистов"
+        if any(w in t_lower for w in ["нет", "не принима", "очередь", "запись", "не работа", "закрыт"]):
+            return "Проблемы с записью/приёмом у врача"
+
+    # Скорая помощь
+    if "скорая" in t_lower or "скорую" in t_lower:
+        if any(w in t_lower for w in ["не прие", "долго", "ждём", "ждем", "не едет", "час"]):
+            return "Долгое ожидание скорой помощи"
+
+    # Аптека / лекарства
+    if "аптек" in t_lower or "лекарств" in t_lower or "препарат" in t_lower:
+        if any(w in t_lower for w in ["нет", "нехватк", "отсутств", "не выдают", "закончил"]):
+            return "Нехватка лекарств / перебои в аптеке"
+
+    # Парковка
+    if "парков" in t_lower or "стоянк" in t_lower:
+        if any(w in t_lower for w in ["нет", "мало", "недостаточ", "негде", "не хватает"]):
+            return "Нехватка парковочных мест"
+        if any(w in t_lower for w in ["брошен", "бросают", "на тротуар", "на газон", "мешают"]):
+            return "Несанкционированная парковка на тротуарах/газонах"
+
+    # Освещение
+    if "фонар" in t_lower or "освещен" in t_lower or "свет" in t_lower and "улиц" in t_lower:
+        if any(w in t_lower for w in ["нет", "не работа", "темно", "сломан", "не горит"]):
+            return "Отсутствие уличного освещения"
+
+    # Детская площадка / благоустройство
+    if "детск" in t_lower and "площадк" in t_lower:
+        if any(w in t_lower for w in ["сломан", "опасн", "разбит", "нет", "плох"]):
+            return "Неисправное/опасное оборудование детской площадки"
+
+    # Газоснабжение
+    if "газ" in t_lower or "газоснабж" in t_lower:
+        if any(w in t_lower for w in ["нет", "отключ", "авари", "утечк", "запах"]):
+            return "Проблемы с газоснабжением"
+
+    # Светофор / перекрёсток
+    if "светофор" in t_lower or "перекрест" in t_lower or "перекрёст" in t_lower:
+        if any(w in t_lower for w in ["не работа", "сломан", "не горит", "отключ", "верни"]):
+            return "Неисправный/отключённый светофор на перекрёстке"
+        if any(w in t_lower for w in ["пробк", "авари", "дтп", "опасн"]):
+            return "Опасная ситуация на перекрёстке"
+
+    # АЗС / бензин / топливо
+    if "бензин" in t_lower or "заправк" in t_lower or "азс" in t_lower or "топлив" in t_lower:
+        if any(w in t_lower for w in ["нет", "кончил", "дефицит", "не достать", "92", "95", "дизел"]):
+            return "Дефицит топлива / проблемы на АЗС"
+
+    # Школа / права детей / образование
+    if "школ" in t_lower or "образован" in t_lower or "учебн" in t_lower:
+        if any(w in t_lower for w in ["нет мест", "не зачислил", "отказал", "нарушил", "права дет"]):
+            return "Нарушение прав при зачислении в школу"
+        if any(w in t_lower for w in ["снес", "закрыт", "разрушен", "аварийн"]):
+            return "Закрытие/снос школьного здания"
+
+    # Бассейн / стройка / инфраструктура
+    if "бассейн" in t_lower:
+        if any(w in t_lower for w in ["снес", "разрушен", "недостро", "не открыт"]):
+            return "Снос/заморозка строительства бассейна"
+
+    # Экология / загрязнение воздуха / промышленность
+    if any(w in t_lower for w in ["воздух", "дышат", "дышать", "дым", "смог", "выброс", "загрязн", "экологи", "отходы"]):
+        if any(w in t_lower for w in ["нельзя", "плох", "ужас", "вредн", "опасн", "завод", "промышл", "запах"]):
+            return "Загрязнение воздуха / экологическая проблема"
+
+    # Животные / бездомные / нападения
+    if any(w in t_lower for w in ["собак", "кошк", "бездомн", "бродяч"]):
+        if any(w in t_lower for w in ["напал", "кусает", "укусил", "стая", "опасн", "агресс"]):
+            return "Нападение бездомных животных / угроза безопасности"
+
+    # Дороги — более широкий охват
+    if "дорог" in t_lower or "дорожн" in t_lower or "проезж" in t_lower:
+        if any(w in t_lower for w in ["не чист", "снег", "грязь", "лужа"]):
+            return "Неудовлетворительная уборка дорог"
+        if any(w in t_lower for w in ["перекрыт", "закрыт", "нет проезд"]):
+            return "Перекрытие дороги / нет проезда"
+
+    # Двор / придомовая территория
+    if "двор" in t_lower:
+        if any(w in t_lower for w in ["мусор", "грязь", "не убира", "свалк"]):
+            return "Антисанитария во дворе / неубранная территория"
+        if any(w in t_lower for w in ["снег", "лед", "наледь", "не чист"]):
+            return "Неубранный снег/лёд во дворе"
 
     # Если шаблоны не сработали, делаем стандартный TextRank
     cleaned = _strip_greeting(text)
+    cleaned = _clean_leading_junk(cleaned)  # убираем эмодзи и VK-теги
     if len(cleaned) <= 120:
-        return _clean_filler(cleaned)
-        
+        result = _clean_filler(cleaned)
+        return result if result else cleaned
+
     sentences = split_into_sentences(cleaned)
     if not sentences:
         return _clean_filler(cleaned[:max_chars])
-        
+
     content_sentences = [s for s in sentences if not _is_filler_sentence(s)]
     if not content_sentences:
         content_sentences = sentences
-        
+
     # Скоринг предложений
     scored = []
     for idx, sentence in enumerate(content_sentences):
@@ -211,33 +456,32 @@ def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = Non
         word_count = len(words)
         if word_count == 0:
             continue
-            
+
         pos_score = 10.0 if idx == 0 else (5.0 if idx == 1 else (2.0 if idx == 2 else 1.0))
         len_score = 3.0 if 5 <= word_count <= 25 else (-5.0 if word_count < 4 else 1.0)
-        
+
         s_lower = sentence.lower()
         kw_hits = sum(1 for kw in _PROBLEM_KEYWORDS if kw in s_lower)
         kw_score = 3.0 * min(kw_hits, 5)
-        
+
         score = pos_score + len_score + kw_score
         scored.append((score, idx, sentence))
-        
+
     if not scored:
         return _clean_filler(cleaned[:max_chars])
-        
+
     scored.sort(key=lambda x: -x[0])
     best = scored[0][2]
-    
-    # Финальная очистка
-    result = _clean_filler(best)
+
+    # Финальная очистка: убираем оставшийся мусор и шумовые фразы
+    result = _clean_leading_junk(best)
+    result = _clean_filler(result)
     if not result:
-        result = best
-        
-    # Делаем настоящую короткую выжимку (обрезаем до 12 слов, если предложение длинное)
-    words = result.split()
-    if len(words) > 12:
-        result = " ".join(words[:12]) + "..."
-        
+        result = _clean_leading_junk(best)
+
+    # Умное обрезание: ищем естественную границу вместо жёсткого лимита слов
+    result = _smart_truncate(result, max_words=22)
+
     return result
 
 
