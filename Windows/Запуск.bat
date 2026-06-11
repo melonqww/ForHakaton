@@ -147,39 +147,43 @@ if not errorlevel 1 (
 
 if not defined OLLAMA_EXE (
     echo [ПРЕДУПРЕЖДЕНИЕ] Утилита ollama.exe не найдена в системе.
-    echo LLM-анализ (Qwen) будет недоступен. Будет использован стандартный TextRank.
+    echo LLM-анализ [Qwen] будет недоступен. Будет использован стандартный TextRank.
     goto skip_ollama
 )
 
 :: Проверяем, запущена ли Ollama на порту 11434
 netstat -ano | findstr :11434 >nul 2>&1
-if errorlevel 1 (
-    echo Ollama не запущена. Запуск службы Ollama в фоновом режиме...
-    start "" "%OLLAMA_EXE%" serve
-    
-    :: Ожидаем запуска порта 11434 (до 30 секунд)
-    echo Ожидание инициализации Ollama...
-    for /l %%i in (1,1,30) do (
-        netstat -ano | findstr :11434 >nul 2>&1
-        if not errorlevel 1 (
-            goto ollama_started
-        )
-        timeout /t 1 >nul
-    )
-    echo [ПРЕДУПРЕЖДЕНИЕ] Ollama не ответила за 30 секунд.
-    :ollama_started
-)
+if not errorlevel 1 goto check_model
 
+echo Ollama не запущена. Запуск службы Ollama в фоновом режиме...
+start "" "%OLLAMA_EXE%" serve
+
+:: Ожидаем запуска порта 11434 (до 30 секунд)
+echo Ожидание инициализации Ollama...
+set "OLLAMA_LOOP=0"
+
+:ollama_wait_loop
+netstat -ano | findstr :11434 >nul 2>&1
+if not errorlevel 1 goto check_model
+timeout /t 1 >nul
+set /a OLLAMA_LOOP+=1
+if %OLLAMA_LOOP% lss 30 goto ollama_wait_loop
+
+echo [ПРЕДУПРЕЖДЕНИЕ] Ollama не ответила за 30 секунд.
+
+:check_model
 :: Проверка наличия модели qwen2.5:0.5b
 echo Проверка модели qwen2.5:0.5b в Ollama...
 "%OLLAMA_EXE%" list | findstr "qwen2.5:0.5b" >nul 2>&1
+if not errorlevel 1 goto ollama_ready
+
+echo Модель qwen2.5:0.5b не найдена. Попытка скачивания модели...
+"%OLLAMA_EXE%" pull qwen2.5:0.5b
 if errorlevel 1 (
-    echo Модель qwen2.5:0.5b не найдена. Попытка скачивания модели...
-    "%OLLAMA_EXE%" pull qwen2.5:0.5b
-    if errorlevel 1 (
-        echo [ПРЕДУПРЕЖДЕНИЕ] Не удалось скачать модель qwen2.5:0.5b. LLM будет недоступна.
-    )
+    echo [ПРЕДУПРЕЖДЕНИЕ] Не удалось скачать модель qwen2.5:0.5b. LLM будет недоступна.
 )
+
+:ollama_ready
 echo [4/5] Ollama проверена.
 
 :skip_ollama
