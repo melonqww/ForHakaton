@@ -178,8 +178,11 @@ echo Запуск веб-интерфейса...
 echo Открытие браузера: %APP_URL%
 echo.
 
-start "" powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 3; Start-Process '%APP_URL%'"
-"%VENV_DIR%\Scripts\streamlit.exe" run app.py --server.address localhost --server.port 8501 --server.headless true --server.maxUploadSize 5120
+:: Открываем веб-страницу напрямую через проводник
+start %APP_URL%
+
+:: Запускаем streamlit через интерпретатор python
+"%PYTHON%" -m streamlit run app.py --server.address localhost --server.port 8501 --server.headless true --server.maxUploadSize 5120
 
 if errorlevel 1 (
     echo.
