@@ -25,8 +25,11 @@ set "PYTHON_ARGS="
 if exist "%PORTABLE_PYTHON%" (
     "%PORTABLE_PYTHON%" --version >nul 2>&1
     if not errorlevel 1 (
-        set "PYTHON_CMD=%PORTABLE_PYTHON%"
-        echo [1/5] Использование портативного Python OK
+        "%PORTABLE_PYTHON%" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+        if not errorlevel 1 (
+            set "PYTHON_CMD=%PORTABLE_PYTHON%"
+            echo [1/5] Использование портативного Python OK
+        )
     )
 )
 
@@ -35,9 +38,12 @@ if not defined PYTHON_CMD (
     if not errorlevel 1 (
         py -3 --version >nul 2>&1
         if not errorlevel 1 (
-            set "PYTHON_CMD=py"
-            set "PYTHON_ARGS=-3"
-            echo [1/5] Использование системного py launcher OK
+            py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+            if not errorlevel 1 (
+                set "PYTHON_CMD=py"
+                set "PYTHON_ARGS=-3"
+                echo [1/5] Использование системного py launcher OK
+            )
         )
     )
 )
@@ -47,14 +53,17 @@ if not defined PYTHON_CMD (
     if not errorlevel 1 (
         python --version >nul 2>&1
         if not errorlevel 1 (
-            set "PYTHON_CMD=python"
-            echo [1/5] Использование системного python OK
+            python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+            if not errorlevel 1 (
+                set "PYTHON_CMD=python"
+                echo [1/5] Использование системного python OK
+            )
         )
     )
 )
 
 if not defined PYTHON_CMD (
-    echo [ОШИБКА] Python не найден.
+    echo [ОШИБКА] Подходящая версия Python 3.10+ не найдена.
     echo Пожалуйста, установите Python 3.10+ или поместите портативную версию в %PORTABLE_PYTHON%
     pause
     exit /b 1
@@ -76,6 +85,16 @@ set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
 :: -- 3. Установка зависимостей -----------------------------------------------
 echo [3/5] Проверка и установка зависимостей...
+
+:: Проверяем, установлены ли уже зависимости (по наличию streamlit)
+if exist "%VENV_DIR%\Scripts\python.exe" (
+    "%PYTHON%" -c "import streamlit" >nul 2>&1
+    if not errorlevel 1 (
+        echo [3/5] Зависимости уже установлены. Пропуск установки.
+        goto skip_install
+    )
+)
+
 "%PYTHON%" -m pip --version >nul 2>&1
 if errorlevel 1 (
     echo Подготовка pip внутри виртуального окружения...
@@ -106,57 +125,57 @@ if errorlevel 1 (
 )
 echo [3/5] Зависимости установлены OK
 
+:skip_install
+
 :: -- 4. Проверка и запуск Ollama ---------------------------------------------
 echo [4/5] Проверка службы Ollama...
+
+:: Ищем ollama в системе
+set "OLLAMA_EXE="
+where ollama >nul 2>&1
+if not errorlevel 1 (
+    set "OLLAMA_EXE=ollama"
+) else (
+    if exist "%USERPROFILE%\AppData\Local\Programs\Ollama\ollama.exe" (
+        set "OLLAMA_EXE=%USERPROFILE%\AppData\Local\Programs\Ollama\ollama.exe"
+    ) else (
+        if exist "%ProgramFiles%\Ollama\ollama.exe" (
+            set "OLLAMA_EXE=%ProgramFiles%\Ollama\ollama.exe"
+        )
+    )
+)
+
+if not defined OLLAMA_EXE (
+    echo [ПРЕДУПРЕЖДЕНИЕ] Утилита ollama.exe не найдена в системе.
+    echo LLM-анализ (Qwen) будет недоступен. Будет использован стандартный TextRank.
+    goto skip_ollama
+)
 
 :: Проверяем, запущена ли Ollama на порту 11434
 netstat -ano | findstr :11434 >nul 2>&1
 if errorlevel 1 (
-    echo Ollama не запущена. Попытка запуска локального процесса...
+    echo Ollama не запущена. Запуск службы Ollama в фоновом режиме...
+    start "" "%OLLAMA_EXE%" serve
     
-    :: Ищем ollama в системе
-    set "OLLAMA_EXE="
-    where ollama >nul 2>&1
-    if not errorlevel 1 (
-        set "OLLAMA_EXE=ollama"
-    ) else (
-        if exist "%USERPROFILE%\AppData\Local\Programs\Ollama\ollama.exe" (
-            set "OLLAMA_EXE=%USERPROFILE%\AppData\Local\Programs\Ollama\ollama.exe"
-        ) else (
-            if exist "%ProgramFiles%\Ollama\ollama.exe" (
-                set "OLLAMA_EXE=%ProgramFiles%\Ollama\ollama.exe"
-            )
+    :: Ожидаем запуска порта 11434 (до 30 секунд)
+    echo Ожидание инициализации Ollama...
+    for /l %%i in (1,1,30) do (
+        netstat -ano | findstr :11434 >nul 2>&1
+        if not errorlevel 1 (
+            goto ollama_started
         )
+        timeout /t 1 >nul
     )
-    
-    if defined OLLAMA_EXE (
-        echo Запуск службы Ollama в фоновом режиме...
-        start "" "%OLLAMA_EXE%" serve
-        
-        :: Ожидаем запуска порта 11434
-        echo Ожидание инициализации Ollama...
-        for /l %%i in (1,1,10) do (
-            netstat -ano | findstr :11434 >nul 2>&1
-            if not errorlevel 1 (
-                goto ollama_started
-            )
-            timeout /t 1 >nul
-        )
-        echo [ПРЕДУПРЕЖДЕНИЕ] Ollama не ответила за 10 секунд.
-        :ollama_started
-    ) else (
-        echo [ПРЕДУПРЕЖДЕНИЕ] Утилита ollama.exe не найдена в системе.
-        echo LLM-анализ (Qwen) будет недоступен. Будет использован стандартный TextRank.
-        goto skip_ollama
-    )
+    echo [ПРЕДУПРЕЖДЕНИЕ] Ollama не ответила за 30 секунд.
+    :ollama_started
 )
 
 :: Проверка наличия модели qwen2.5:0.5b
 echo Проверка модели qwen2.5:0.5b в Ollama...
-ollama list | findstr "qwen2.5:0.5b" >nul 2>&1
+"%OLLAMA_EXE%" list | findstr "qwen2.5:0.5b" >nul 2>&1
 if errorlevel 1 (
     echo Модель qwen2.5:0.5b не найдена. Попытка скачивания модели...
-    ollama pull qwen2.5:0.5b
+    "%OLLAMA_EXE%" pull qwen2.5:0.5b
     if errorlevel 1 (
         echo [ПРЕДУПРЕЖДЕНИЕ] Не удалось скачать модель qwen2.5:0.5b. LLM будет недоступна.
     )
@@ -179,7 +198,7 @@ echo Открытие браузера: %APP_URL%
 echo.
 
 :: Открываем веб-страницу напрямую через проводник
-start %APP_URL%
+start "" "%APP_URL%"
 
 :: Запускаем streamlit через интерпретатор python
 "%PYTHON%" -m streamlit run app.py --server.address localhost --server.port 8501 --server.headless true --server.maxUploadSize 5120
