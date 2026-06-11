@@ -2,11 +2,10 @@
 chcp 1251 >nul 2>&1
 setlocal
 
-:: -- Настройка путей --------------------------------------------------------
-set "SCRIPT_DIR=%~dp0"
-pushd "%SCRIPT_DIR%.." >nul 2>&1
+:: -- Переходим в корень проекта (на один уровень выше папки Windows) ---------
+cd /d "%~dp0.."
 set "PROJECT_DIR=%CD%"
-popd >nul
+set "SCRIPT_DIR=%~dp0"
 
 set "VENV_DIR=%PROJECT_DIR%\.venv"
 set "OFFLINE_PACKAGES=%SCRIPT_DIR%offline_packages_windows"
