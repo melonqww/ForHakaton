@@ -165,7 +165,8 @@ set "OLLAMA_LOOP=0"
 :ollama_wait_loop
 netstat -ano | findstr :11434 >nul 2>&1
 if not errorlevel 1 goto check_model
-timeout /t 1 >nul
+:: Используем ping для тихой задержки в 1 секунду (работает в любом окружении)
+ping -n 2 127.0.0.1 >nul 2>&1
 set /a OLLAMA_LOOP+=1
 if %OLLAMA_LOOP% lss 30 goto ollama_wait_loop
 
