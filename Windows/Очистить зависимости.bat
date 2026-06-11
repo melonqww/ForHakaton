@@ -5,7 +5,7 @@ cd /d "%~dp0.."
 set "PROJECT_DIR=%CD%"
 set "VENV_DIR=%PROJECT_DIR%\.venv"
 
-echo РћС‡РёСЃС‚РєР° СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅС‹С… Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№ Рё РєСЌС€Р°...
+echo Очистка установленных зависимостей и кэша...
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$project=(Resolve-Path '%PROJECT_DIR%').Path; " ^
@@ -16,5 +16,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Get-ChildItem -LiteralPath $project -Recurse -Force -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; " ^
   "Get-ChildItem -Path $project -Recurse -Force -File | Where-Object { $_.Extension -eq '.pyc' -or $_.Extension -eq '.pyo' } | Remove-Item -Force -ErrorAction SilentlyContinue"
 
-echo Р“РѕС‚РѕРІРѕ.
+echo Готово.
 pause

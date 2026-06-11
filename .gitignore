@@ -1,0 +1,33 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Excel files and outputs
+*.xlsx
+*.xls
+Обработанные файлы/
+
+# Huge binary assets (copied from ForHakaton-final)
+Windows/offline_packages_windows/
+Windows/portable_python_windows/
+Linux/offline_packages_linux/
+Linux/portable_python_linux/
+
+# Original project backups
+ForHakaton-main/
+ForHakaton-final/
+
+# Streamlit config
+.streamlit/
+
+# OS specific files
+.DS_Store
+Thumbs.db

@@ -71,6 +71,7 @@ echo "[3/5] Зависимости установлены OK"
 # ── 4. Проверка и запуск Ollama ─────────────────────────────────────────────
 echo "[4/5] Проверка службы Ollama..."
 
+OLLAMA_AVAILABLE=1
 # Проверка, слушает ли порт 11434
 if ! ss -tuln | grep -q ":11434"; then
     echo "Ollama не запущена. Попытка запуска..."
@@ -87,23 +88,24 @@ if ! ss -tuln | grep -q ":11434"; then
             sleep 1
         done
     else
-        echo "[ОШИБКА] Команда ollama не найдена."
-        echo "Пожалуйста, установите Ollama с официального сайта: https://ollama.com"
-        exit 1
+        echo "[ПРЕДУПРЕЖДЕНИЕ] Утилита ollama не найдена."
+        echo "LLM-анализ (Qwen) будет недоступен. Будет использован стандартный TextRank."
+        OLLAMA_AVAILABLE=0
     fi
 fi
 
-# Проверка наличия модели qwen2.5:0.5b
-echo "Проверка модели qwen2.5:0.5b в Ollama..."
-if ! ollama list | grep -q "qwen2.5:0.5b"; then
-    echo "Модель qwen2.5:0.5b не найдена. Скачивание модели..."
-    ollama pull qwen2.5:0.5b
-    if [ $? -ne 0 ]; then
-        echo "[ОШИБКА] Не удалось скачать модель qwen2.5:0.5b."
-        exit 1
+if [ "$OLLAMA_AVAILABLE" -eq 1 ]; then
+    # Проверка наличия модели qwen2.5:0.5b
+    echo "Проверка модели qwen2.5:0.5b в Ollama..."
+    if ! ollama list | grep -q "qwen2.5:0.5b"; then
+        echo "Модель qwen2.5:0.5b не найдена. Скачивание модели..."
+        ollama pull qwen2.5:0.5b
+        if [ $? -ne 0 ]; then
+            echo "[ПРЕДУПРЕЖДЕНИЕ] Не удалось скачать модель qwen2.5:0.5b."
+        fi
     fi
 fi
-echo "[4/5] Ollama и модель qwen2.5:0.5b OK"
+echo "[4/5] Ollama проверена."
 
 # ── 5. Проверка порта и запуск Streamlit ────────────────────────────────────
 echo "[5/5] Проверка порта 8501..."
