@@ -1241,8 +1241,8 @@ with tab_analytics:
                 cache_entry = ai_cache.get(selected_file, {})
                 cache_status = cache_entry.get("status")
                 if cache_status == "generating":
-                    st.info("🤖 Аналитическая сводка от ИИ создается в фоновом режиме, пожалуйста, подождите...")
-                    st.session_state.need_rerun_analytics = True
+                    st.info("🤖 Аналитическая сводка от ИИ создается в фоновом режиме. Вы можете продолжать работу с графиками и картой ниже.")
+                    st.button("🔄 Обновить статус сводки", key=f"refresh_analytics_status_{selected_file}")
                 elif cache_status == "error":
                     st.error("🤖 Не удалось создать аналитическую сводку от ИИ.")
                     with st.expander("Показать подробности ошибки"):
@@ -1263,8 +1263,8 @@ with tab_analytics:
                     )
                     t.daemon = True
                     t.start()
-                    st.info("🤖 Аналитическая сводка от ИИ создается в фоновом режиме, пожалуйста, подождите...")
-                    st.session_state.need_rerun_analytics = True
+                    st.info("🤖 Аналитическая сводка от ИИ создается в фоновом режиме. Вы можете продолжать работу с графиками и картой ниже.")
+                    st.button("🔄 Обновить статус сводки", key=f"refresh_analytics_status_init_{selected_file}")
             else:
                 st.markdown("##### 🤖 Аналитическая сводка от ИИ")
                 formatted_summary = ai_summary.replace("\n\n", "<br><br>").replace("\n", "<br>")

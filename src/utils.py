@@ -67,3 +67,10 @@ def find_column_index(df, key: str, default_idx: int) -> int:
     except Exception as e:
         # При любой ошибке возвращаем default_idx
         return default_idx
+
+
+def contains_chinese(text: str) -> bool:
+    """Проверяет, содержит ли строка китайские иероглифы."""
+    if not text:
+        return False
+    return any('\u4e00' <= char <= '\u9fff' for char in text)

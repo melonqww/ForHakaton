@@ -532,6 +532,9 @@ def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = Non
     return result
 
 
+from src.utils import contains_chinese
+
+
 def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api/generate") -> tuple[str, bool]:
     """Генеративная суммаризация через локальный API Ollama."""
     if not text:
@@ -548,26 +551,31 @@ def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api
         f"Текст жалобы: {working_text}"
     )
     
-    try:
-        response = requests.post(
-            ollama_url,
-            json={
-                "model": "qwen2.5:0.5b",
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "repetition_penalty": 1.05
-                }
-            },
-            timeout=5
-        )
-        if response.status_code == 200:
-            summary = response.json().get("response", "").strip()
-            summary = summary.replace('"', '').replace("'", "")
-            return summary[:300], True
-    except Exception:
-        pass
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                ollama_url,
+                json={
+                    "model": "qwen2.5:0.5b",
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.25 + (attempt * 0.1),
+                        "repetition_penalty": 1.05
+                    }
+                },
+                timeout=5
+            )
+            if response.status_code == 200:
+                summary = response.json().get("response", "").strip()
+                summary = summary.replace('"', '').replace("'", "")
+                if summary and not contains_chinese(summary):
+                    return summary[:300], True
+                else:
+                    print(f"[AI extract_summary_llm Retry] Attempt {attempt + 1} generated Chinese characters or empty text, retrying...")
+        except Exception as e:
+            print(f"[AI extract_summary_llm Retry] Attempt {attempt + 1} failed: {e}")
+            pass
         
     return extract_summary_local(text), False
 
@@ -642,29 +650,35 @@ def generate_district_summary_llm(
         f"Напиши одну лаконичную и красивую фразу о проблемах района:"
     )
     
-    try:
-        chat_url = ollama_url.replace("/api/generate", "/api/chat")
-        response = requests.post(
-            chat_url,
-            json={
-                "model": "qwen2.5:1.5b",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "stream": False,
-                "options": {
-                    "temperature": 0.25,
-                    "repetition_penalty": 1.05
-                }
-            },
-            timeout=30
-        )
-        if response.status_code == 200:
-            summary = response.json().get("message", {}).get("content", "").strip()
-            # Убираем кавычки
-            summary = summary.replace('"', '').replace("'", "")
-            return summary
-    except Exception:
-        pass
+    for attempt in range(3):
+        try:
+            chat_url = ollama_url.replace("/api/generate", "/api/chat")
+            response = requests.post(
+                chat_url,
+                json={
+                    "model": "qwen2.5:1.5b",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.25 + (attempt * 0.1),
+                        "repetition_penalty": 1.05
+                    }
+                },
+                timeout=30
+            )
+            if response.status_code == 200:
+                summary = response.json().get("message", {}).get("content", "").strip()
+                # Убираем кавычки
+                summary = summary.replace('"', '').replace("'", "")
+                if summary and not contains_chinese(summary):
+                    return summary
+                else:
+                    print(f"[AI generate_district_summary_llm Retry] Attempt {attempt + 1} generated Chinese characters or empty text, retrying...")
+        except Exception as e:
+            print(f"[AI generate_district_summary_llm Retry] Attempt {attempt + 1} failed: {e}")
+            pass
+            
     return "; ".join(summaries[:3])

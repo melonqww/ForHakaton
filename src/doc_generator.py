@@ -18,31 +18,46 @@ import requests
 _OLLAMA_MODEL_LARGE = "qwen2.5:1.5b"
 
 
+from src.utils import contains_chinese
+
+
 def _call_qwen(system_prompt: str, user_prompt: str, ollama_url: str, timeout: int = 90) -> str:
     """Вызов Qwen 1.5B через Ollama API/Chat. Возвращает пустую строку при ошибке."""
-    try:
-        # Enforce Russian language strictly to avoid Chinese/gibberish drift
-        strict_system = system_prompt + "\nОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ! Использование китайских иероглифов, латиницы или других нерусских символов категорически запрещено."
-        chat_url = ollama_url.replace("/api/generate", "/api/chat")
-        resp = requests.post(
-            chat_url,
-            json={
-                "model": _OLLAMA_MODEL_LARGE,
-                "messages": [
-                    {"role": "system", "content": strict_system},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "stream": False,
-                "options": {"temperature": 0.3, "repetition_penalty": 1.05, "num_predict": 2048},
-            },
-            timeout=timeout,
-        )
-        if resp.status_code == 200:
-            text = resp.json().get("message", {}).get("content", "").strip()
-            text = text.replace('"', '').replace("'", "")
-            return text
-    except Exception:
-        pass
+    # Enforce Russian language strictly to avoid Chinese/gibberish drift
+    strict_system = system_prompt + "\nОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ! Использование китайских иероглифов, латиницы или других нерусских символов категорически запрещено."
+    chat_url = ollama_url.replace("/api/generate", "/api/chat")
+    
+    # Try up to 3 times to get a clean Russian response without Chinese characters
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                chat_url,
+                json={
+                    "model": _OLLAMA_MODEL_LARGE,
+                    "messages": [
+                        {"role": "system", "content": strict_system},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.25 + (attempt * 0.1),  # slight variation
+                        "repetition_penalty": 1.05, 
+                        "num_predict": 2048
+                    },
+                },
+                timeout=timeout,
+            )
+            if resp.status_code == 200:
+                text = resp.json().get("message", {}).get("content", "").strip()
+                text = text.replace('"', '').replace("'", "")
+                if text and not contains_chinese(text):
+                    return text
+                else:
+                    print(f"[AI _call_qwen Retry] Attempt {attempt + 1} returned Chinese characters or empty text, retrying...")
+        except Exception as e:
+            print(f"[AI _call_qwen Retry] Attempt {attempt + 1} failed: {e}")
+            pass
+            
     return ""
 
 
