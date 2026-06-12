@@ -1885,15 +1885,7 @@ with tab_preview:
                     st.button("🔄 Обновить статус Word/PDF", key=f"refresh_preview_status_init_{selected_file}")
         
             st.markdown("---")
-            col_tbl_title, col_tbl_toggle = st.columns([6, 4])
-            with col_tbl_title:
-                st.markdown("##### 📊 Просмотр готового отчета")
-            with col_tbl_toggle:
-                show_all_rows = st.checkbox(
-                    "Показать всю таблицу (все строки)",
-                    value=False,
-                    key=f"show_all_preview_{selected_file}"
-                )
+            st.markdown("##### Первые строки готового отчета")
 
             # Показываем только нужные смысловые колонки (без сырого и очищенного текста)
             DISPLAY_COLS = [
@@ -1908,14 +1900,7 @@ with tab_preview:
                 "Дата создания",
                 "Дата окончания",
             ]
-            if show_all_rows and os.path.exists(out_path):
-                try:
-                    df_full = pd.read_excel(out_path)
-                    df_clean = df_full.dropna(how='all', axis=0).fillna("")
-                except Exception:
-                    df_clean = preview_df.dropna(how='all', axis=0).fillna("")
-            else:
-                df_clean = preview_df.dropna(how='all', axis=0).fillna("")
+            df_clean = preview_df.dropna(how='all', axis=0).fillna("")
 
             # Берём только те колонки из списка, которые реально есть в DataFrame
             show_cols = [c for c in DISPLAY_COLS if c in df_clean.columns]
@@ -1940,7 +1925,7 @@ with tab_preview:
                     pass
                 return ''
 
-            df_to_show = df_clean if show_all_rows else df_clean.head(100)
+            df_to_show = df_clean.head(100)
 
             if "Ранг критичности" in df_clean.columns:
                 try:
