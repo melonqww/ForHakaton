@@ -1908,7 +1908,15 @@ with tab_preview:
                 "Дата создания",
                 "Дата окончания",
             ]
-            df_clean = preview_df.dropna(how='all', axis=0).fillna("")
+            if show_all_rows and os.path.exists(out_path):
+                try:
+                    df_full = pd.read_excel(out_path)
+                    df_clean = df_full.dropna(how='all', axis=0).fillna("")
+                except Exception:
+                    df_clean = preview_df.dropna(how='all', axis=0).fillna("")
+            else:
+                df_clean = preview_df.dropna(how='all', axis=0).fillna("")
+
             # Берём только те колонки из списка, которые реально есть в DataFrame
             show_cols = [c for c in DISPLAY_COLS if c in df_clean.columns]
             # Если ни одной не нашлось — покажем всё что есть кроме мусора
