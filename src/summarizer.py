@@ -561,7 +561,8 @@ def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api
                     "stream": False,
                     "options": {
                         "temperature": 0.25 + (attempt * 0.1),
-                        "repetition_penalty": 1.05
+                        "repetition_penalty": 1.05,
+                        "num_predict": 1024
                     }
                 },
                 timeout=5
@@ -569,6 +570,8 @@ def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api
             if response.status_code == 200:
                 summary = response.json().get("response", "").strip()
                 summary = summary.replace('"', '').replace("'", "")
+                # Clean up any trailing incomplete symbols
+                summary = summary.rstrip(' \n\r\t#*-\u200b').strip()
                 if summary and not contains_chinese(summary):
                     return summary[:300], True
                 else:
@@ -664,7 +667,8 @@ def generate_district_summary_llm(
                     "stream": False,
                     "options": {
                         "temperature": 0.25 + (attempt * 0.1),
-                        "repetition_penalty": 1.05
+                        "repetition_penalty": 1.05,
+                        "num_predict": 1024
                     }
                 },
                 timeout=30
@@ -673,6 +677,8 @@ def generate_district_summary_llm(
                 summary = response.json().get("message", {}).get("content", "").strip()
                 # Убираем кавычки
                 summary = summary.replace('"', '').replace("'", "")
+                # Clean up trailing incomplete symbols
+                summary = summary.rstrip(' \n\r\t#*-\u200b').strip()
                 if summary and not contains_chinese(summary):
                     return summary
                 else:

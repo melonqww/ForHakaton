@@ -50,6 +50,8 @@ def _call_qwen(system_prompt: str, user_prompt: str, ollama_url: str, timeout: i
             if resp.status_code == 200:
                 text = resp.json().get("message", {}).get("content", "").strip()
                 text = text.replace('"', '').replace("'", "")
+                # Clean up any trailing incomplete symbols (like ##, #, *, etc.)
+                text = text.rstrip(' \n\r\t#*-\u200b').strip()
                 if text and not contains_chinese(text):
                     return text
                 else:
@@ -102,7 +104,7 @@ def generate_executive_summary(stats: dict, ollama_url: str) -> str:
         f"Напиши структурированную сводку для губернатора по указанному формату:"
     )
 
-    text = _call_qwen(system_prompt, user_prompt, ollama_url, timeout=60)
+    text = _call_qwen(system_prompt, user_prompt, ollama_url, timeout=120)
 
     if not text:
         # Fallback без ИИ
