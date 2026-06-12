@@ -170,20 +170,20 @@ def _process_chunk_inline(chunk_data, classifier):
 
         # Preview нужен только для экрана Streamlit. Для 400k строк нельзя
         # собирать полный processed_rows — это замедляет обработку и тратит память.
+        # Очищенный текст НЕ включаем — он не нужен в отчёте и занимает память.
         if len(processed_rows) < preview_limit:
             row_data = list(chunk_rows[i])
-            row_data[5] = settlements[i]  # автозаполненный населенный пункт
-            row_data.extend([""] * 5)
+            row_data[5] = settlements[i]  # автозаполненный населённый пункт
+            row_data.extend([""] * 4)
 
-            row_data[7] = text          # Очищенный текст
-            row_data[8] = geo           # Нормализованное Гео
-            row_data[9] = rank          # Ранг критичности
-            row_data[10] = summary      # Краткое саммари
+            row_data[7] = geo           # Нормализованное Гео
+            row_data[8] = rank          # Ранг критичности
+            row_data[9] = summary       # Краткое саммари
 
             if has_incident_type_column:
-                row_data[11] = "Решаемый" if inc_type == "Проблема" else "Информационный"
+                row_data[10] = "Решаемый" if inc_type == "Проблема" else "Информационный"
             else:
-                row_data[11] = inc_type
+                row_data[10] = inc_type
 
             processed_rows.append(row_data)
 
@@ -277,22 +277,21 @@ def run_pipeline(input_path: str, output_path: str, use_llm: bool = False,
         headers[col_mun] if col_mun < len(headers) else "Муниципалитет",
         headers[col_settlement] if col_settlement < len(headers) else "Населенный пункт",
         headers[col_text] if col_text < len(headers) else "Текст инцидента",
-        "Очищенный текст",
         "Нормализованное Гео",
         "Ранг критичности",
         "Краткое саммари",
         "Тип инцидента"
     ]
 
-    # Стриминг-экспортер (новые индексы колонок в 12-колоночном файле)
+    # Стриминг-экспортер (новые индексы колонок в 11-колоночном файле)
     exporter = StreamingExcelExporter(
         output_path,
         out_headers,
         text_col=6,
         group_col=2,
-        rank_col=9,
-        summary_col=10,
-        type_col=11
+        rank_col=7,
+        summary_col=8,
+        type_col=9
     )
 
     agg_stats = {

@@ -33,6 +33,10 @@ def normalize_municipality(name: str) -> str:
 
     try:
         cleaned_name = name.strip()
+        cleaned_lower = cleaned_name.lower()
+        if "омская область, другое" in cleaned_lower or cleaned_lower == "омская область":
+            return "Омская область"
+            
         match = process.extractOne(
             cleaned_name,
             OMSK_DISTRICTS,

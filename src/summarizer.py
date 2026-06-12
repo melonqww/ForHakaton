@@ -139,22 +139,69 @@ def _is_filler_sentence(sentence: str) -> bool:
     return False
 
 
-def _smart_truncate(text: str, max_words: int = 25) -> str:
-    """Умное обрезание: ищет естественную границу (запятую/союз) рядом с лимитом.
-    Не ставит '...' если текст и так заканчивается нормально.
+def _smart_truncate(text: str, max_chars: int = 300) -> str:
+    """Умное обрезание по количеству символов.
+    Ищет естественную границу (конец предложения, запятую, союз) перед лимитом.
+    Предотвращает обрезание посередине слов, кавычек или скобок.
     """
-    words = text.split()
-    if len(words) <= max_words:
+    if not text:
+        return ""
+    if len(text) <= max_chars:
         return text
-    # Ищем хорошую точку обрыва: запятую или союз чуть раньше лимита
-    _BREAK_WORDS = {"и", "но", "а", "или", "что", "где", "когда", "потому", "так", "также"}
-    # Сначала пробуем найти запятую в конце слова рядом с лимитом
-    for i in range(min(max_words, len(words)) - 1, max(max_words - 6, 3), -1):
-        w = words[i].rstrip(",;")
-        if words[i].endswith(",") or words[i+1].lower() in _BREAK_WORDS:
-            return " ".join(words[:i+1]).rstrip(",") + "..."
-    # Иначе просто обрезаем по лимиту
-    return " ".join(words[:max_words]) + "..."
+
+    # Обрезаем строку с запасом на троеточие
+    limit = max_chars - 3
+    if limit <= 0:
+        return "..."
+
+    # Пробуем обрезать по последней точке/знаку препинания (. ! ?) в пределах лимита
+    # Но знак препинания должен быть достаточно близко к концу лимита (в пределах 60 символов)
+    best_cut = -1
+    for p in ['. ', '! ', '? ']:
+        pos = text[:limit].rfind(p)
+        if pos > limit - 60:
+            best_cut = max(best_cut, pos + 1)
+            
+    if best_cut != -1:
+        return text[:best_cut].strip() + "..."
+
+    # Пробуем обрезать по запятой или союзу/предлогу
+    truncated = text[:limit]
+    
+    # Ищем последний пробел перед лимитом
+    last_space = truncated.rfind(' ')
+    if last_space != -1 and last_space > limit - 40:
+        truncated = truncated[:last_space]
+        
+    # Убираем висячие союзы/предлоги в конце
+    _BREAK_WORDS = {
+        "и", "но", "а", "или", "что", "где", "когда", "потому", "так", "также", "чтобы", 
+        "раз", "то", "как", "для", "на", "в", "с", "по", "у", "к", "о", "об", "обо", "из", "от", "до"
+    }
+    words = truncated.split()
+    while words and words[-1].lower().rstrip(",.!:;?") in _BREAK_WORDS:
+        words.pop()
+    
+    truncated = " ".join(words)
+    
+    # Очищаем от висячих знаков
+    truncated = truncated.rstrip(' ,.-:;("«')
+
+    # Закрываем или убираем несбалансированные скобки и кавычки на конце
+    if truncated.count('(') > truncated.count(')'):
+        last_paren = truncated.rfind('(')
+        if last_paren != -1 and last_paren > len(truncated) - 60:
+            truncated = truncated[:last_paren].rstrip(' ,.-:;')
+            
+    if truncated.count('«') > truncated.count('»'):
+        last_quote = truncated.rfind('«')
+        if last_quote != -1 and last_quote > len(truncated) - 60:
+            truncated = truncated[:last_quote].rstrip(' ,.-:;')
+            
+    if not truncated:
+        return text[:limit].rstrip(' ,.-:;("«') + "..."
+        
+    return truncated + "..."
 
 
 # Диапазоны Unicode эмодзи для быстрой фильтрации
@@ -402,12 +449,12 @@ def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = Non
     if "школ" in t_lower or "образован" in t_lower or "учебн" in t_lower:
         if any(w in t_lower for w in ["нет мест", "не зачислил", "отказал", "нарушил", "права дет"]):
             return "Нарушение прав при зачислении в школу"
-        if any(w in t_lower for w in ["снес", "закрыт", "разрушен", "аварийн"]):
+        if any(w in t_lower for w in ["аварийная школа", "аварийное здание школы", "снос школы", "закрытие школы", "школу закрыли", "школа закрыта", "закрывают школу", "рухнул потолок в школе"]):
             return "Закрытие/снос школьного здания"
 
     # Бассейн / стройка / инфраструктура
     if "бассейн" in t_lower:
-        if any(w in t_lower for w in ["снес", "разрушен", "недостро", "не открыт"]):
+        if any(w in t_lower for w in ["снос бассейна", "заморозка строительства бассейна", "недостроенный бассейн", "бассейн не достроили", "бассейн закрыт"]):
             return "Снос/заморозка строительства бассейна"
 
     # Экология / загрязнение воздуха / промышленность
@@ -479,8 +526,8 @@ def extract_summary_local(text: str, max_chars: int = 300, text_lower: str = Non
     if not result:
         result = _clean_leading_junk(best)
 
-    # Умное обрезание: ищем естественную границу вместо жёсткого лимита слов
-    result = _smart_truncate(result, max_words=22)
+    # Умное обрезание: ищем естественную границу вместо жёсткого лимита
+    result = _smart_truncate(result, max_chars=max_chars)
 
     return result
 
@@ -496,6 +543,7 @@ def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api
 
     prompt = (
         "Сделай краткую выжимку (саммари) сути следующей жалобы гражданина на русском языке. "
+        "ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ! Использование китайских иероглифов, латиницы или других нерусских символов категорически запрещено. "
         "Верни ТОЛЬКО саму суть в одно предложение, длиной не более 300 символов, без вводных фраз и кавычек.\n\n"
         f"Текст жалобы: {working_text}"
     )
@@ -509,7 +557,7 @@ def extract_summary_llm(text: str, ollama_url: str = "http://localhost:11434/api
                 "stream": False,
                 "options": {
                     "temperature": 0.3,
-                    "repetition_penalty": 1.2
+                    "repetition_penalty": 1.05
                 }
             },
             timeout=5
@@ -573,45 +621,50 @@ def generate_district_summary_llm(
     if not summaries:
         return f"В районе {district} нет зарегистрированных критических проблем."
         
-    problems_text = "\n- ".join(summaries)
-    context_block = ""
-    if source_context:
-        context_block = (
-            "Контекст, который Ollama предварительно получила из исходного Excel:\n"
-            f"{source_context}\n\n"
-        )
-    prompt = (
-        f"Ты — аналитик центра управления регионом Омской области. Напиши один связный аналитический абзац (до 400 символов) "
-        f"от третьего лица о ключевых проблемах в районе '{district}'. Объясни с точки зрения аналитика, какие основные системные проблемы "
-        f"вызвали поток жалоб (например, почему район оказался в лидерах по обращениям), опираясь на предварительный контекст исходного файла и следующий список инцидентов:\n"
-        f"{context_block}"
-        f"- {problems_text}\n\n"
-        f"Правила:\n"
-        f"1. Полностью исключи любые даты, время (например, 'в 10:00', 'вчера', '05.06') или персональные данные.\n"
-        f"2. Пиши строго как профессиональный аналитик, структурирующий суть жалоб.\n"
-        f"3. Обобщай суть проблем, не копируя текст инцидентов дословно.\n"
-        f"4. Не используй списки, кавычки, приветствия и вводные фразы.\n"
-        f"5. Пиши строго по фактам из предоставленного списка, не выдумывая внешних деталей."
+    problems_text = "\n- ".join(summaries[:3])
+    
+    system_prompt = (
+        "Ты — главный аналитик Центра управления регионом (ЦУР) Омской области. "
+        "Напиши одну короткую, связную и красивую аналитическую сводку (до 250 символов) "
+        f"о ключевых системных проблемах в районе '{district}' на основе предоставленных жалоб. "
+        "ОТВЕЧАЙ СТРОГО НА РУССКОМ ЯЗЫКЕ! Использование китайских иероглифов, латиницы или других нерусских символов категорически запрещено.\n"
+        "Правила:\n"
+        "1. Пиши емко и лаконично (1-2 предложения от третьего лица).\n"
+        "2. Опиши исключительно реальные проблемы из списка (ЖКХ, дороги, транспорт и т.д.). Игнорируй слова благодарности или спам.\n"
+        "3. Полностью исключи адреса, имена, даты и любые персональные данные.\n"
+        "4. Начни сразу с сути (без 'Анализ показывает...' или 'В районе...'). Не используй списки, кавычки и вводные фразы."
     )
+    
+    user_prompt = (
+        f"Район: {district}\n"
+        f"Зафиксированные инциденты:\n"
+        f"- {problems_text}\n\n"
+        f"Напиши одну лаконичную и красивую фразу о проблемах района:"
+    )
+    
     try:
+        chat_url = ollama_url.replace("/api/generate", "/api/chat")
         response = requests.post(
-            ollama_url,
+            chat_url,
             json={
-                "model": "qwen2.5:0.5b",
-                "prompt": prompt,
+                "model": "qwen2.5:1.5b",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
                 "stream": False,
                 "options": {
-                    "temperature": 0.3,
-                    "repetition_penalty": 1.2
+                    "temperature": 0.25,
+                    "repetition_penalty": 1.05
                 }
             },
-            timeout=8
+            timeout=30
         )
         if response.status_code == 200:
-            summary = response.json().get("response", "").strip()
+            summary = response.json().get("message", {}).get("content", "").strip()
             # Убираем кавычки
             summary = summary.replace('"', '').replace("'", "")
             return summary
     except Exception:
         pass
-    return ""
+    return "; ".join(summaries[:3])
